@@ -93,7 +93,7 @@ function publicServersPage() {
  <div class="server-summary"><div><span class="section-index">PUBLIC SERVERS / DAILY SNAPSHOT</span><strong>${state.serverCatalog?`${list.length} 个服务器`:'服务器目录'}</strong><p>目录更新：${esc(date)} · 数据来源 Minecraft Java Servers${state.serverCatalog?.truncated?' · 列表已截取':''}</p></div><span>状态与人数为每日快照，可能已经变化</span></div>
  <div class="server-toolbar"><label class="server-search"><span class="sr-only">搜索服务器</span><input id="server-search" type="search" placeholder="搜索名称、地址、版本或玩法" value="${esc(state.serverQuery)}"></label><label><span class="sr-only">筛选状态</span><select id="server-status"><option value="all" ${state.serverStatus==='all'?'selected':''}>全部状态</option><option value="online" ${state.serverStatus==='online'?'selected':''}>快照在线</option><option value="offline" ${state.serverStatus==='offline'?'selected':''}>快照离线</option></select></label></div>
  ${state.serverError?`<div class="server-warning">目录加载失败：${esc(state.serverError)}${state.serverCatalog?'；当前显示的是上次获取的目录。':''}</div>`:''}<div class="server-list">${rows.length?rows.map((s,i)=>`<article class="server-row">${thumbnail('server',s.address,'globe-2','server-symbol')}<div class="server-details"><div class="server-name"><strong>${esc(s.name||s.address)}</strong><span class="server-state ${s.status==='online'?'online':''}">${s.status==='online'?'快照在线':s.status==='offline'?'快照离线':'状态未知'}</span></div><p>${esc(s.description||'暂无简介')}</p><div class="server-meta"><code>${esc(s.address)}</code><span>${esc(s.version||'版本未知')}</span>${Array.isArray(s.tags)?s.tags.slice(0,3).map(t=>`<span>${esc(t)}</span>`).join(''):''}${s.requiresMods===true?'<span>需要模组</span>':''}</div></div><div class="server-players">${Number.isInteger(s.playersOnline)?esc(s.playersOnline):'—'}<small> / ${Number.isInteger(s.playersMax)?esc(s.playersMax):'—'}</small><span>快照人数</span></div><button class="row-button" data-server-copy="${page*size+i}">复制地址</button></article>`).join(''):`<div class="empty-state">${icon('globe-2',27)}<strong>${state.serverLoading?'正在获取服务器目录…':state.serverCatalog?'没有匹配的服务器':'暂未获取服务器目录'}</strong><p>${state.serverCatalog?'试试其他关键词或状态。':'可点击刷新重试。'}</p></div>`}</div>
- ${maxPage?`<div class="server-pagination"><span>第 ${page+1} / ${maxPage+1} 页</span><div><button class="outline-btn" data-server-page="${page-1}" ${page===0?'disabled':''}>上一页</button><button class="outline-btn" data-server-page="${page+1}" ${page===maxPage?'disabled':''}>下一页</button></div></div>`:''}<p class="lan-network-note">服务器由第三方运营，CCL 不保证其安全性或可用性。加入前请核对版本、模组及服务器规则；正版服务器需要正版账户。</p>`;
+ <div class="server-pagination-slot">${maxPage?`<div class="server-pagination"><span>第 ${page+1} / ${maxPage+1} 页</span><div><button class="outline-btn" data-server-page="${page-1}" ${page===0?'disabled':''}>上一页</button><button class="outline-btn" data-server-page="${page+1}" ${page===maxPage?'disabled':''}>下一页</button></div></div>`:''}</div><p class="lan-network-note">服务器由第三方运营，CCL 不保证其安全性或可用性。加入前请核对版本、模组及服务器规则；正版服务器需要正版账户。</p>`;
 }
 async function refreshPublicServers() {
  if(state.serverLoading) return;
@@ -278,6 +278,8 @@ async function refreshJava() {
  state.javaLoading = false; if (state.page === 'java') render();
 }
 let renderedPage = null;
+let composingSearch = false;
+let pendingCompositionRender = false;
 function activeJobCount() { return state.jobs.filter(j => j.status === 'queued' || j.status === 'running').length; }
 function renderChrome() {
  const root = app.querySelector('#toast-root'); if (!root) return;
@@ -289,6 +291,8 @@ function renderChrome() {
 }
 function renderOverlay() { const root = app.querySelector('#modal-root'); if (!root) return; root.innerHTML = state.launchView ? launchScreen() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : ''; hydrateIcons(); }
 function render() {
+ if(composingSearch && renderedPage===state.page) { pendingCompositionRender=true;return; }
+ if(composingSearch && renderedPage!==state.page) { composingSearch=false;pendingCompositionRender=false; }
  const first = !app.querySelector('.app-shell');
  if (first) app.innerHTML = shell();
  else {
@@ -305,6 +309,13 @@ function render() {
   app.querySelector('.avatar').textContent = playerName().slice(0,1).toUpperCase(); app.querySelector('.profile strong').textContent = playerName(); app.querySelector('.profile small').textContent = state.accountMode==='microsoft' && state.account ? '微软账户' : '离线玩家';
  }
  renderedPage = state.page; renderChrome(); renderOverlay(); hydrateIcons(); hydrateThumbnails(); refreshPreview();
+}
+function updateSearchResults(kind) {
+ const content=app.querySelector('.content');if(!content)return;
+ const preview=document.createElement('div');preview.innerHTML=kind==='server'?publicServersPage():versionsPage();
+ const selectors=kind==='server'?['.server-summary','.server-list','.server-pagination-slot']:['.version-list','.version-toolbar .count'];
+ for(const selector of selectors) { const old=content.querySelector(selector),next=preview.querySelector(selector);if(old&&next) old.replaceWith(next); }
+ hydrateIcons();hydrateThumbnails();
 }
 async function refresh() {
  state.loading = true; render();
@@ -400,14 +411,16 @@ app.addEventListener('click', async event => {
  if (action === 'launch') { const view={version:state.selected,phase:'preparing',error:''}; state.launchView=view; state.crash=null; renderOverlay(); try { await invoke('launch_game', { options: { version: state.selected, username: state.username, javaPath: state.javaPath, gameDir: state.gameDir, memory: Number(state.memory), optimize:state.optimize, jvmArgs:state.jvmArgs, gameArgs:state.gameArgs, accountMode:state.accountMode } }); if(state.launchView===view && view.phase==='preparing') { view.phase='started'; renderOverlay(); } } catch (e) { if(state.launchView===view) { view.phase='failed'; view.error=String(e); renderOverlay(); } else flash(`启动失败：${e}`, 'error'); } }
 });
 app.addEventListener('change', event => {
- if(event.target.id==='server-status') { state.serverStatus=event.target.value;state.serverPage=0;render();return; }
+ if(event.target.id==='server-status') { state.serverStatus=event.target.value;state.serverPage=0;updateSearchResults('server');return; }
  if(event.target.id==='skin-model') { state.skinModel=event.target.value;render();return; }
  if(event.target.id==='contentTarget') { state.contentTarget=event.target.value; state.contentResults=[]; state.localMods=[]; refreshMods(); return; }
  if (event.target.name==='draftLoader' && state.installDraft) { state.installDraft.loader=event.target.value; state.installDraft.addons=state.installDraft.addons.filter(id=>ADDONS.find(a=>a.id===id)?.loaders.includes(state.installDraft.loader)); renderOverlay(); return; }
  if (event.target.name==='draftAddon' && state.installDraft) { const selected=state.installDraft.addons; state.installDraft.addons=event.target.checked ? [...new Set([...selected,event.target.value])] : selected.filter(x=>x!==event.target.value); return; }
  if (event.target.closest('#content-form') && ['source','kind'].includes(event.target.name)) { const form=event.target.closest('form'); const data=new FormData(form); state.contentSource=data.get('source'); state.contentKind=data.get('kind'); state.contentQuery=data.get('query') || ''; state.contentKey=data.get('apiKey') || state.contentKey; state.contentResults=[]; render(); }
 });
-app.addEventListener('input', event => { if(event.target.id==='server-search') { state.serverQuery=event.target.value;state.serverPage=0;render();return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { state.versionQuery=event.target.value; render(); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if (event.target.id === 'memory') event.target.closest('.field').querySelector('label span').textContent = `${event.target.value} MB`; });
+app.addEventListener('compositionstart', event => { if(['server-search','version-filter'].includes(event.target.id)) composingSearch=true; });
+app.addEventListener('compositionend', event => { if(!['server-search','version-filter'].includes(event.target.id)) return; composingSearch=false; if(event.target.id==='server-search') {state.serverQuery=event.target.value;state.serverPage=0;} else state.versionQuery=event.target.value; if(pendingCompositionRender) {pendingCompositionRender=false;render();} else updateSearchResults(event.target.id==='server-search'?'server':'version'); });
+app.addEventListener('input', event => { if(event.target.id==='server-search') { if(composingSearch || event.isComposing) return; state.serverQuery=event.target.value;state.serverPage=0;updateSearchResults('server');return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { if(composingSearch || event.isComposing) return; state.versionQuery=event.target.value; updateSearchResults('version'); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if (event.target.id === 'memory') event.target.closest('.field').querySelector('label span').textContent = `${event.target.value} MB`; });
 app.addEventListener('submit', async event => { if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey); await searchContent(); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory')), optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); render(); flash('设置已保存。'); if (changed) await refresh(); });
 async function init() {
  render();
