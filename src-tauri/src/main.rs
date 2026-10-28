@@ -3,6 +3,8 @@ mod archive;
 mod auth;
 mod content;
 mod java;
+mod lan;
+mod lan_core;
 mod loaders;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
@@ -1011,6 +1013,10 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            lan::ipv6_addresses,
+            lan::start_ipv6_room,
+            lan::stop_ipv6_room,
+            lan::test_ipv6_connection,
             default_game_dir,
             configure_proxy,
             list_versions,
