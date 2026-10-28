@@ -7,8 +7,10 @@ use sha2::{Digest, Sha512};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
+    io::Read,
     path::{Component, Path, PathBuf},
-    time::Duration,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant},
 };
 
 #[derive(Serialize)]
@@ -78,21 +80,130 @@ fn project_url(value: &Value, source: &str, kind: &str, id: &str) -> Option<Stri
         _ => None,
     }
 }
+#[derive(Serialize)]
+pub struct ProjectLink {
+    label: String,
+    url: String,
+}
+fn public_link(value: &str) -> Option<String> {
+    if value.len() > 2048 {
+        return None;
+    }
+    let url = reqwest::Url::parse(value).ok()?;
+    if !matches!(url.scheme(), "http" | "https")
+        || !url.username().is_empty()
+        || url.password().is_some()
+    {
+        return None;
+    }
+    let host = url.host_str()?;
+    if host.eq_ignore_ascii_case("localhost")
+        || host.ends_with(".localhost")
+        || host.ends_with(".local")
+    {
+        return None;
+    }
+    if let Ok(ip) = host.trim_matches(['[', ']']).parse::<std::net::IpAddr>() {
+        match ip {
+            std::net::IpAddr::V4(ip)
+                if ip.is_private()
+                    || ip.is_loopback()
+                    || ip.is_link_local()
+                    || ip.is_unspecified()
+                    || ip.is_multicast() =>
+            {
+                return None
+            }
+            std::net::IpAddr::V6(ip)
+                if ip.is_loopback()
+                    || ip.is_unspecified()
+                    || ip.is_unique_local()
+                    || ip.is_unicast_link_local()
+                    || ip.is_multicast()
+                    || ip.to_ipv4_mapped().is_some() =>
+            {
+                return None
+            }
+            _ => {}
+        }
+    }
+    Some(url.to_string())
+}
+fn project_links(value: &Value, source: &str) -> Vec<ProjectLink> {
+    let mut result: Vec<ProjectLink> = Vec::new();
+    let mut add = |label: &str, value: Option<&str>| {
+        if let Some(url) = value.and_then(public_link) {
+            if !result.iter().any(|link| link.url == url) {
+                let label = if reqwest::Url::parse(&url).ok().is_some_and(|u| {
+                    u.host_str()
+                        .is_some_and(|host| host == "mcmod.cn" || host.ends_with(".mcmod.cn"))
+                        && (u.path().starts_with("/class/") || u.path().starts_with("/modpack/"))
+                }) {
+                    "MC 百科"
+                } else {
+                    label
+                };
+                result.push(ProjectLink {
+                    label: label.into(),
+                    url,
+                });
+            }
+        }
+    };
+    if source == "modrinth" {
+        for (label, field) in [
+            ("项目 Wiki", "wiki_url"),
+            ("源代码", "source_url"),
+            ("问题反馈", "issues_url"),
+            ("社区", "discord_url"),
+        ] {
+            add(label, value[field].as_str());
+        }
+        if let Some(donations) = value["donation_urls"].as_array() {
+            for donation in donations {
+                add("赞助", donation["url"].as_str());
+            }
+        }
+    } else if source == "curseforge" {
+        for (label, field) in [
+            ("项目网站", "websiteUrl"),
+            ("项目 Wiki", "wikiUrl"),
+            ("源代码", "sourceUrl"),
+            ("问题反馈", "issuesUrl"),
+        ] {
+            add(label, value["links"][field].as_str());
+        }
+    }
+    result
+}
+#[tauri::command]
+pub async fn content_links(
+    source: String,
+    project_id: String,
+    api_key: String,
+) -> ResultT<Vec<ProjectLink>> {
+    valid_id(&project_id)?;
+    let client = http_client()?;
+    let base = source_url(&source)?;
+    let path = if source == "modrinth" {
+        format!("{base}/project/{project_id}")
+    } else {
+        format!("{base}/mods/{project_id}")
+    };
+    let data = query_json(request(&client, &path, &source, &api_key)?).await?;
+    Ok(project_links(
+        if source == "curseforge" {
+            &data["data"]
+        } else {
+            &data
+        },
+        &source,
+    ))
+}
 #[tauri::command]
 pub fn open_content_page(url: String) -> ResultT<()> {
-    let parsed = reqwest::Url::parse(&url).map_err(|_| "项目网址无效")?;
-    if parsed.scheme() != "https"
-        || !parsed.username().is_empty()
-        || parsed.password().is_some()
-        || parsed.port().is_some()
-        || !matches!(
-            parsed.host_str(),
-            Some("modrinth.com" | "www.curseforge.com")
-        )
-    {
-        return Err("项目网址不受支持".into());
-    }
-    crate::auth::open_browser(parsed.as_str())
+    let parsed = public_link(&url).ok_or("项目网址无效或不受支持")?;
+    crate::auth::open_browser(&parsed)
 }
 
 fn valid_id(id: &str) -> ResultT<()> {
@@ -188,143 +299,152 @@ pub async fn search_content(
     } else {
         None
     };
-    let data = if source == "modrinth" {
-        let mut filters = vec![vec![format!("project_type:{kind}")]];
-        if let Some((_, game, loader)) = &target {
-            filters.push(vec![format!("versions:{game}")]);
-            filters.push(vec![format!("categories:{loader}")]);
-        }
-        let facets = json!(filters).to_string();
-        query_json(
-            request(&client, &format!("{base}/search"), &source, &api_key)?.query(&[
-                ("query", query.as_str()),
-                ("limit", "30"),
-                ("offset", offset.as_str()),
-                ("index", sort_index),
-                ("facets", facets.as_str()),
-            ]),
-        )
-        .await?
-    } else {
-        let class = if kind == "mod" { "6" } else { "4471" };
-        let mut req =
-            request(&client, &format!("{base}/mods/search"), &source, &api_key)?.query(&[
-                ("gameId", "432"),
-                ("classId", class),
-                ("pageSize", "30"),
-                ("index", offset.as_str()),
-                ("sortField", sort_index),
-                ("sortOrder", "desc"),
-                ("searchFilter", query.as_str()),
-            ]);
-        if let Some((_, game, loader)) = &target {
-            req = req.query(&[
-                ("gameVersion", game.as_str()),
-                (
-                    "modLoaderType",
-                    curse_loader(loader).ok_or("不支持的模组加载器")?,
-                ),
-            ]);
-        }
-        query_json(req).await?
-    };
-    let entries = if source == "modrinth" {
-        &data["hits"]
-    } else {
-        &data["data"]
-    };
-    let raw_count = entries.as_array().ok_or("搜索结果格式无效")?.len() as u64;
-    let total = if source == "modrinth" {
-        data["total_hits"].as_u64()
-    } else {
-        data["pagination"]["totalCount"].as_u64()
-    };
-    let has_more = page < 332
-        && raw_count > 0
-        && total
-            .map(|n| u64::from(page) * 30 + raw_count < n)
-            .unwrap_or(raw_count == 30);
-    let installed = if let Some((dir, _, _)) = &target {
-        installed_projects(&client, dir, &source).await?
-    } else {
-        HashMap::new()
-    };
-    let hits: Vec<ContentHit> = entries
-        .as_array()
-        .ok_or("搜索结果格式无效")?
-        .iter()
-        .filter_map(|v| {
-            let id = if source == "modrinth" {
-                v["project_id"].as_str()?.to_string()
-            } else {
-                v["id"].as_u64()?.to_string()
-            };
-            let title = if source == "modrinth" {
-                v["title"].as_str()?
-            } else {
-                v["name"].as_str()?
-            };
-            Some(ContentHit {
-                id: id.clone(),
-                title: title.into(),
-                description: v[if source == "modrinth" {
-                    "description"
-                } else {
-                    "summary"
-                }]
-                .as_str()
-                .unwrap_or("")
-                .into(),
-                author: if source == "modrinth" {
-                    v["author"].as_str().unwrap_or("").to_string()
-                } else {
-                    v["authors"]
-                        .as_array()
-                        .and_then(|a| a.first())
-                        .and_then(|a| a["name"].as_str())
-                        .unwrap_or("")
-                        .into()
-                },
-                downloads: v[if source == "modrinth" {
-                    "downloads"
-                } else {
-                    "downloadCount"
-                }]
-                .as_u64()
-                .unwrap_or(0),
-                installed: installed.contains_key(&id),
-                source: source.clone(),
-                icon_url: content_icon(v, &source),
-                project_url: project_url(v, &source, &kind, &id),
-            })
-        })
-        .collect();
-    if let Some((_, game, loader)) = target {
-        let results = stream::iter(hits.into_iter().map(|hit| {
-            let client = &client;
-            let source = &source;
-            let api_key = &api_key;
-            let game = &game;
-            let loader = &loader;
-            async move {
-                // Search facets can match game and loader on different releases; confirm one release matches both.
-                match mod_versions_raw(client, source, &hit.id, game, loader, api_key).await {
-                    Ok(v) if !v.is_empty() => Ok(Some(hit)),
-                    Ok(_) => Ok(None),
-                    Err(e) => Err(e),
-                }
+    let search = async {
+        let data = if source == "modrinth" {
+            let mut filters = vec![vec![format!("project_type:{kind}")]];
+            if let Some((_, game, loader)) = &target {
+                filters.push(vec![format!("versions:{game}")]);
+                filters.push(vec![format!("categories:{loader}")]);
             }
-        }))
-        .buffered(6)
-        .try_collect::<Vec<_>>()
-        .await?;
-        Ok(ContentPage {
-            hits: results.into_iter().flatten().collect(),
-            has_more,
-        })
-    } else {
-        Ok(ContentPage { hits, has_more })
+            let facets = json!(filters).to_string();
+            query_json(
+                request(&client, &format!("{base}/search"), &source, &api_key)?.query(&[
+                    ("query", query.as_str()),
+                    ("limit", "30"),
+                    ("offset", offset.as_str()),
+                    ("index", sort_index),
+                    ("facets", facets.as_str()),
+                ]),
+            )
+            .await?
+        } else {
+            let class = if kind == "mod" { "6" } else { "4471" };
+            let mut req = request(&client, &format!("{base}/mods/search"), &source, &api_key)?
+                .query(&[
+                    ("gameId", "432"),
+                    ("classId", class),
+                    ("pageSize", "30"),
+                    ("index", offset.as_str()),
+                    ("sortField", sort_index),
+                    ("sortOrder", "desc"),
+                    ("searchFilter", query.as_str()),
+                ]);
+            if let Some((_, game, loader)) = &target {
+                req = req.query(&[
+                    ("gameVersion", game.as_str()),
+                    (
+                        "modLoaderType",
+                        curse_loader(loader).ok_or("不支持的模组加载器")?,
+                    ),
+                ]);
+            }
+            query_json(req).await?
+        };
+        let entries = if source == "modrinth" {
+            &data["hits"]
+        } else {
+            &data["data"]
+        };
+        let raw_count = entries.as_array().ok_or("搜索结果格式无效")?.len() as u64;
+        let total = if source == "modrinth" {
+            data["total_hits"].as_u64()
+        } else {
+            data["pagination"]["totalCount"].as_u64()
+        };
+        let has_more = page < 332
+            && raw_count > 0
+            && total
+                .map(|n| u64::from(page) * 30 + raw_count < n)
+                .unwrap_or(raw_count == 30);
+        let hits: Vec<ContentHit> = entries
+            .as_array()
+            .ok_or("搜索结果格式无效")?
+            .iter()
+            .filter_map(|v| {
+                let id = if source == "modrinth" {
+                    v["project_id"].as_str()?.to_string()
+                } else {
+                    v["id"].as_u64()?.to_string()
+                };
+                let title = if source == "modrinth" {
+                    v["title"].as_str()?
+                } else {
+                    v["name"].as_str()?
+                };
+                Some(ContentHit {
+                    id: id.clone(),
+                    title: title.into(),
+                    description: v[if source == "modrinth" {
+                        "description"
+                    } else {
+                        "summary"
+                    }]
+                    .as_str()
+                    .unwrap_or("")
+                    .into(),
+                    author: if source == "modrinth" {
+                        v["author"].as_str().unwrap_or("").to_string()
+                    } else {
+                        v["authors"]
+                            .as_array()
+                            .and_then(|a| a.first())
+                            .and_then(|a| a["name"].as_str())
+                            .unwrap_or("")
+                            .into()
+                    },
+                    downloads: v[if source == "modrinth" {
+                        "downloads"
+                    } else {
+                        "downloadCount"
+                    }]
+                    .as_u64()
+                    .unwrap_or(0),
+                    installed: false,
+                    source: source.clone(),
+                    icon_url: content_icon(v, &source),
+                    project_url: project_url(v, &source, &kind, &id),
+                })
+            })
+            .collect();
+        if let Some((_, game, loader)) = &target {
+            let results = stream::iter(hits.into_iter().map(|hit| {
+                let client = &client;
+                let source = &source;
+                let api_key = &api_key;
+                let game = &game;
+                let loader = &loader;
+                async move {
+                    // Search facets can match game and loader on different releases; confirm one release matches both.
+                    match compatible_project(client, source, &hit.id, game, loader, api_key).await {
+                        Ok(true) => Ok(Some(hit)),
+                        Ok(false) => Ok(None),
+                        Err(e) => Err(e),
+                    }
+                }
+            }))
+            .buffered(12)
+            .try_collect::<Vec<_>>()
+            .await?;
+            Ok(ContentPage {
+                hits: results.into_iter().flatten().collect(),
+                has_more,
+            })
+        } else {
+            Ok(ContentPage { hits, has_more })
+        }
+    };
+    let installed = async {
+        if let Some((dir, _, _)) = &target {
+            installed_projects(&client, dir, &source).await
+        } else {
+            Ok(HashMap::new())
+        }
+    };
+    let (mut page, installed) = tokio::try_join!(search, installed)?;
+    for hit in &mut page.hits {
+        hit.installed = installed.contains_key(&hit.id);
     }
+    Ok(page)
 }
 fn current_instance(game_dir: &str, version: &str) -> ResultT<(PathBuf, String, String)> {
     let dir = root(game_dir)?;
@@ -376,44 +496,212 @@ async fn installed_projects(
         }
     }
     if source == "modrinth" {
-        let mut hashes = HashMap::new();
-        if let Ok(entries) = fs::read_dir(&mods) {
-            for entry in entries.flatten() {
-                let name = entry.file_name().to_string_lossy().into_owned();
-                if (name.ends_with(".jar") || name.ends_with(".jar.disabled"))
-                    && entry.file_type().map(|t| t.is_file()).unwrap_or(false)
-                {
-                    if let Ok(bytes) = fs::read(entry.path()) {
-                        hashes.insert(format!("{:x}", Sha1::digest(bytes)), name);
-                    }
-                }
-            }
-        }
-        if !hashes.is_empty() {
-            // Identification is best-effort: local records remain useful when this optional lookup fails.
-            if let Ok(data) = query_json(
-                client
-                    .post("https://api.modrinth.com/v2/version_files")
-                    .timeout(Duration::from_secs(30))
-                    .json(
-                        &json!({"hashes": hashes.keys().collect::<Vec<_>>(), "algorithm":"sha1"}),
-                    ),
-            )
+        let hashes = tokio::task::spawn_blocking(move || hash_mod_files(&mods))
             .await
-            {
-                if let Some(map) = data.as_object() {
-                    for (hash, value) in map {
-                        if let (Some(id), Some(name)) =
-                            (value["project_id"].as_str(), hashes.get(hash))
-                        {
-                            ids.insert(id.to_string(), name.clone());
-                        }
-                    }
+            .map_err(|e| format!("读取已安装模组失败: {e}"))?;
+        if !hashes.is_empty() {
+            let mapping = identify_mod_hashes(client, &hashes).await;
+            for (hash, id) in mapping {
+                if let Some(name) = hashes.get(&hash) {
+                    ids.insert(id, name.clone());
                 }
             }
         }
     }
     Ok(ids)
+}
+type ModFileCache = HashMap<PathBuf, (u64, std::time::SystemTime, String)>;
+static MOD_FILE_HASHES: OnceLock<Mutex<ModFileCache>> = OnceLock::new();
+static MOD_IDENTITIES: OnceLock<Mutex<HashMap<String, (Instant, HashMap<String, String>)>>> =
+    OnceLock::new();
+fn hash_mod_files(mods: &Path) -> HashMap<String, String> {
+    let mut hashes = HashMap::new();
+    let cache = MOD_FILE_HASHES.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Ok(entries) = fs::read_dir(mods) {
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !(name.ends_with(".jar") || name.ends_with(".jar.disabled"))
+                || !entry.file_type().map(|t| t.is_file()).unwrap_or(false)
+            {
+                continue;
+            }
+            let path = entry.path();
+            let Ok(meta) = entry.metadata() else {
+                continue;
+            };
+            let modified = meta.modified().ok();
+            let cached = modified.and_then(|time| {
+                cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(&path)
+                    .filter(|(size, saved_time, _)| *size == meta.len() && *saved_time == time)
+                    .map(|(_, _, hash)| hash.clone())
+            });
+            if let Some(hash) = cached {
+                hashes.insert(hash, name);
+                continue;
+            }
+            let Ok(mut file) = fs::File::open(&path) else {
+                continue;
+            };
+            let mut hash = Sha1::new();
+            let mut buf = [0u8; 65536];
+            let success = loop {
+                match file.read(&mut buf) {
+                    Ok(0) => break true,
+                    Ok(n) => hash.update(&buf[..n]),
+                    Err(_) => break false,
+                }
+            };
+            if success {
+                let hash = format!("{:x}", hash.finalize());
+                if let (Some(time), Ok(after)) = (modified, fs::metadata(&path)) {
+                    if after.len() == meta.len() && after.modified().ok() == Some(time) {
+                        let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+                        if cache.len() >= 5000 {
+                            cache.clear();
+                        }
+                        cache.insert(path, (meta.len(), time, hash.clone()));
+                    }
+                }
+                hashes.insert(hash, name);
+            }
+        }
+    }
+    hashes
+}
+async fn identify_mod_hashes(
+    client: &reqwest::Client,
+    hashes: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut keys: Vec<_> = hashes.keys().collect();
+    keys.sort();
+    let mut digest = Sha1::new();
+    for key in &keys {
+        digest.update(key.as_bytes());
+    }
+    let cache_key = format!("{:x}", digest.finalize());
+    let cache = MOD_IDENTITIES.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((at, value)) = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&cache_key)
+    {
+        if at.elapsed() < Duration::from_secs(300) {
+            return value.clone();
+        }
+    }
+    // Identifying files copied from another launcher is best-effort; CCL's own records remain available.
+    let Ok(data) = query_json(
+        client
+            .post("https://api.modrinth.com/v2/version_files")
+            .timeout(Duration::from_secs(8))
+            .json(&json!({"hashes":keys,"algorithm":"sha1"})),
+    )
+    .await
+    else {
+        return HashMap::new();
+    };
+    let Some(entries) = data.as_object() else {
+        return HashMap::new();
+    };
+    let mapping = entries
+        .iter()
+        .filter_map(|(hash, value)| {
+            value["project_id"]
+                .as_str()
+                .map(|id| (hash.clone(), id.to_string()))
+        })
+        .collect::<HashMap<_, _>>();
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() >= 128 {
+        cache.retain(|_, (at, _)| at.elapsed() < Duration::from_secs(300));
+        if cache.len() >= 128 {
+            cache.clear();
+        }
+    }
+    cache.insert(cache_key, (Instant::now(), mapping.clone()));
+    mapping
+}
+type CompatibilityKey = (String, String, String, String, String);
+static COMPATIBILITY_CACHE: OnceLock<Mutex<HashMap<CompatibilityKey, (Instant, bool)>>> =
+    OnceLock::new();
+const COMPATIBILITY_TTL: Duration = Duration::from_secs(300);
+async fn compatible_project(
+    client: &reqwest::Client,
+    source: &str,
+    id: &str,
+    game: &str,
+    loader: &str,
+    key: &str,
+) -> ResultT<bool> {
+    let base = source_url(source)?;
+    compatible_project_from(client, base, source, id, game, loader, key).await
+}
+async fn compatible_project_from(
+    client: &reqwest::Client,
+    base: &str,
+    source: &str,
+    id: &str,
+    game: &str,
+    loader: &str,
+    key: &str,
+) -> ResultT<bool> {
+    let cache_key = (
+        source.to_string(),
+        id.to_string(),
+        game.to_string(),
+        loader.to_string(),
+        format!("{:x}", Sha1::digest(key.as_bytes())),
+    );
+    let cache = COMPATIBILITY_CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    if let Some((at, compatible)) = cache
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .get(&cache_key)
+    {
+        if at.elapsed() < COMPATIBILITY_TTL {
+            return Ok(*compatible);
+        }
+    }
+    valid_id(id)?;
+    let compatible = if source == "modrinth" {
+        let games = json!([game]).to_string();
+        let loaders = json!([loader]).to_string();
+        let data = query_json(
+            request(client, &format!("{base}/project/{id}/version"), source, key)?.query(&[
+                ("game_versions", games.as_str()),
+                ("loaders", loaders.as_str()),
+            ]),
+        )
+        .await?;
+        !data.as_array().ok_or("模组版本数据格式无效")?.is_empty()
+    } else {
+        let lt = curse_loader(loader).ok_or("请选择已安装加载器的游戏版本")?;
+        let data = query_json(
+            request(client, &format!("{base}/mods/{id}/files"), source, key)?.query(&[
+                ("gameVersion", game),
+                ("modLoaderType", lt),
+                ("pageSize", "1"),
+                ("index", "0"),
+            ]),
+        )
+        .await?;
+        !data["data"]
+            .as_array()
+            .ok_or("模组版本数据格式无效")?
+            .is_empty()
+    };
+    let mut cache = cache.lock().unwrap_or_else(|e| e.into_inner());
+    if cache.len() >= 2000 {
+        cache.retain(|_, (at, _)| at.elapsed() < COMPATIBILITY_TTL);
+        if cache.len() >= 2000 {
+            cache.clear();
+        }
+    }
+    cache.insert(cache_key, (Instant::now(), compatible));
+    Ok(compatible)
 }
 async fn mod_versions_raw(
     client: &reqwest::Client,
@@ -1376,7 +1664,116 @@ mod tests {
             project_url(&json!({}), "modrinth", "mod", "AANobbMI").as_deref(),
             Some("https://modrinth.com/mod/AANobbMI")
         );
-        assert!(open_content_page("https://modrinth.com.evil.example/mod/test".into()).is_err());
+        assert!(public_link("http://127.0.0.1/private").is_none());
+    }
+
+    #[test]
+    fn cached_mod_hashes_follow_file_changes() {
+        let dir = std::env::temp_dir().join(format!("ccl-mod-hashes-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("example.jar"), b"first").unwrap();
+        let first = hash_mod_files(&dir);
+        assert_eq!(first.len(), 1);
+        assert_eq!(hash_mod_files(&dir), first);
+        fs::write(dir.join("example.jar"), b"second and changed").unwrap();
+        let second = hash_mod_files(&dir);
+        assert_eq!(second.len(), 1);
+        assert_ne!(first, second);
+        fs::remove_file(dir.join("example.jar")).unwrap();
+        assert!(hash_mod_files(&dir).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn compatibility_checks_one_file_and_caches_by_game_version() {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut buf = [0u8; 4096];
+                let n = stream.read(&mut buf).await.unwrap();
+                requests.push(String::from_utf8_lossy(&buf[..n]).to_string());
+                let body = r#"{"data":[{"id":1}]}"#;
+                stream
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                            body.len(),
+                            body
+                        )
+                        .as_bytes(),
+                    )
+                    .await
+                    .unwrap();
+            }
+            requests
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        assert!(compatible_project_from(
+            &client,
+            &base,
+            "curseforge",
+            "987654321",
+            "1.20.1",
+            "fabric",
+            "test-key"
+        )
+        .await
+        .unwrap());
+        assert!(compatible_project_from(
+            &client,
+            &base,
+            "curseforge",
+            "987654321",
+            "1.20.1",
+            "fabric",
+            "test-key"
+        )
+        .await
+        .unwrap());
+        assert!(compatible_project_from(
+            &client,
+            &base,
+            "curseforge",
+            "987654321",
+            "1.21",
+            "fabric",
+            "test-key"
+        )
+        .await
+        .unwrap());
+        let requests = tokio::time::timeout(Duration::from_secs(2), server)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(requests.len(), 2);
+        assert!(requests
+            .iter()
+            .all(|request| request.contains("pageSize=1")));
+    }
+
+    #[test]
+    fn project_links_only_include_safe_available_urls() {
+        let links = project_links(
+            &json!({"wiki_url":"https://www.mcmod.cn/class/123.html", "source_url":"https://github.com/example/mod", "issues_url":"http://127.0.0.1/admin", "donation_urls":[{"url":"https://patreon.com/example"}]}),
+            "modrinth",
+        );
+        assert_eq!(links.len(), 3);
+        assert_eq!(links[0].label, "MC 百科");
+        assert_eq!(links[1].label, "源代码");
+        assert_eq!(links[2].label, "赞助");
+        let curse = project_links(
+            &json!({"links":{"websiteUrl":"https://www.curseforge.com/minecraft/mc-mods/example","wikiUrl":"https://example.org/wiki"}}),
+            "curseforge",
+        );
+        assert_eq!(curse.len(), 2);
+        assert!(public_link("javascript:alert(1)").is_none());
+        assert!(public_link("https://user:password@example.com").is_none());
+        assert!(public_link("http://[::1]/").is_none());
     }
 
     #[test]
