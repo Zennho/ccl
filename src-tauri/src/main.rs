@@ -6,6 +6,7 @@ mod java;
 mod lan;
 mod lan_core;
 mod loaders;
+mod server_catalog;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1017,6 +1018,7 @@ fn main() {
             lan::start_ipv6_room,
             lan::stop_ipv6_room,
             lan::test_ipv6_connection,
+            server_catalog::public_servers,
             default_game_dir,
             configure_proxy,
             list_versions,
