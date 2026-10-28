@@ -1,6 +1,7 @@
 import './style.css';
 import './journal-theme.css';
 import './multiplayer.css';
+import './custom-theme.css';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { createIcons, Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks } from 'lucide';
 import { invoke, isTauri } from '@tauri-apps/api/core';
@@ -10,7 +11,65 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 const icons = { Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks };
 const saved = JSON.parse(localStorage.getItem('ccl-settings') || '{}');
 const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, versionQuery: '', accountMode: 'offline', account: null, browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, versionDelete: null, versionDeleting: false, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentResults: [], contentBusy: false, localMods: [], modDelete: null, jobs: [], installDraft: null };
+const appearanceDefaults = { bannerOpacity: 0, backgroundOpacity: 35, backgroundFrost: 42, backgroundBlur: 8 };
+const clampAppearance = (value, fallback, max = 100) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(max, Number(value))) : fallback;
+const theme = { bannerOpacity: clampAppearance(saved.theme?.bannerOpacity, 0), backgroundOpacity: clampAppearance(saved.theme?.backgroundOpacity, 35), backgroundFrost: clampAppearance(saved.theme?.backgroundFrost, 42), backgroundBlur: clampAppearance(saved.theme?.backgroundBlur, 8, 30), banner: null, background: null };
 const app = document.querySelector('#app');
+function applyTheme() {
+ const root=document.documentElement;
+ root.style.setProperty('--ccl-banner-opacity', String(1-theme.bannerOpacity/100));
+ root.style.setProperty('--ccl-background-opacity', String(1-theme.backgroundOpacity/100));
+ root.style.setProperty('--ccl-background-frost', String(theme.backgroundFrost/100));
+ root.style.setProperty('--ccl-background-blur', `${theme.backgroundBlur}px`);
+ root.style.setProperty('--ccl-banner-image', theme.banner ? `url("${theme.banner}")` : 'none');
+ root.style.setProperty('--ccl-background-image', theme.background ? `url("${theme.background}")` : 'none');
+ root.classList.toggle('has-custom-background', !!theme.background);
+ root.classList.toggle('has-custom-banner', !!theme.banner);
+}
+function imageStore(mode, key, value) {
+ return new Promise((resolve,reject)=>{
+  if(!window.indexedDB) return reject(new Error('本设备不支持保存自定义图片'));
+  const open=indexedDB.open('ccl-appearance',1);
+  open.onupgradeneeded=()=>open.result.createObjectStore('images');
+  open.onerror=()=>reject(open.error || new Error('无法打开图片存储'));
+  open.onsuccess=()=>{
+   const db=open.result, tx=db.transaction('images', mode==='get'?'readonly':'readwrite'), store=tx.objectStore('images');
+   const request=mode==='get'?store.get(key):mode==='put'?store.put(value,key):store.delete(key);
+   let result;request.onsuccess=()=>{result=request.result;};
+   tx.oncomplete=()=>{db.close();resolve(result);};
+   tx.onerror=()=>{db.close();reject(tx.error || new Error('无法保存图片'));};
+   tx.onabort=()=>{db.close();reject(tx.error || new Error('图片保存已中止'));};
+  };
+ });
+}
+const imageRevision={banner:0,background:0};
+function setThemeImage(kind, blob) {
+ if(theme[kind]) URL.revokeObjectURL(theme[kind]);
+ theme[kind]=blob ? URL.createObjectURL(blob) : null;
+ applyTheme();
+}
+async function restoreThemeImages() {
+ await Promise.all(['banner','background'].map(async kind=>{
+  const revision=imageRevision[kind];
+  try { const blob=await imageStore('get',kind);if(revision===imageRevision[kind] && blob) setThemeImage(kind,blob); }
+  catch { /* The default theme remains available when storage is unavailable. */ }
+ }));
+}
+function validateThemeImage(file) {
+ if(!['image/png','image/jpeg','image/webp'].includes(file.type)) return Promise.reject(new Error('请选择 PNG、JPEG 或 WebP 图片'));
+ if(file.size>20*1024*1024) return Promise.reject(new Error('图片不能超过 20 MB'));
+ return new Promise((resolve,reject)=>{
+  const url=URL.createObjectURL(file), image=new Image();
+  image.onload=()=>{URL.revokeObjectURL(url);image.naturalWidth && image.naturalHeight ? resolve() : reject(new Error('图片无法读取'));};
+  image.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('图片无法读取'));};
+  image.src=url;
+ });
+}
+function appearanceSettings() {
+ const slider=(key,label,max,unit)=>`<div class="theme-control"><label for="theme-${key}">${label}<output>${theme[key]}${unit}</output></label><input id="theme-${key}" data-theme-setting="${key}" type="range" min="0" max="${max}" value="${theme[key]}"></div>`;
+ return `<section class="settings-section theme-settings"><div class="settings-heading"><div class="settings-icon">${icon('layout-grid',20)}</div><div><span class="section-index">APPEARANCE</span><h3>界面外观</h3><p>选择本地图片，自定义启动器的视觉效果。</p></div></div><div class="theme-grid"><div class="theme-card"><div class="theme-card-head"><div><strong>主界面横幅</strong><p>建议使用横向图片。</p></div><span>01</span></div><div class="theme-preview theme-preview-banner" aria-label="横幅预览"><div></div></div><div class="theme-image-actions"><label class="outline-btn theme-upload">选择图片<input type="file" data-theme-image="banner" accept="image/png,image/jpeg,image/webp"></label><button type="button" class="text-link" data-theme-reset="banner">恢复默认</button></div>${slider('bannerOpacity','图片透明度',100,'%')}</div><div class="theme-card"><div class="theme-card-head"><div><strong>全局背景</strong><p>图片将显示在整个界面底层。</p></div><span>02</span></div><div class="theme-preview theme-preview-background" aria-label="背景预览"><div></div><i></i></div><div class="theme-image-actions"><label class="outline-btn theme-upload">选择图片<input type="file" data-theme-image="background" accept="image/png,image/jpeg,image/webp"></label><button type="button" class="text-link" data-theme-reset="background">恢复默认</button></div>${slider('backgroundOpacity','图片透明度',100,'%')}${slider('backgroundFrost','磨砂强度',100,'%')}${slider('backgroundBlur','背景模糊',30,' px')}</div></div><p class="theme-footnote">调整即时生效并保存在本设备。支持 PNG、JPEG、WebP，单张图片不超过 20 MB。</p></section>`;
+}
+
 function hydrateIcons() { createIcons({ icons }); app.querySelectorAll('svg[data-lucide]').forEach(el => el.removeAttribute('data-lucide')); }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const icon = (name, size = 18) => `<i data-lucide="${name}" width="${size}" height="${size}"></i>`;
@@ -42,7 +101,7 @@ function hydrateThumbnails() {
  if(!thumbnailObserver) thumbnailObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){thumbnailObserver.unobserve(entry.target);loadThumbnail(entry.target);}}),{rootMargin:'120px'});
  thumbnailObserver.disconnect();images.forEach(image=>thumbnailObserver.observe(image));
 }
-const persist = () => localStorage.setItem('ccl-settings', JSON.stringify({ selected: state.selected, username: state.username, javaPath: state.javaPath, proxyUrl: state.proxyUrl, gameDir: state.gameDir, memory: state.memory, optimize: state.optimize, jvmArgs: state.jvmArgs, gameArgs: state.gameArgs }));
+const persist = () => localStorage.setItem('ccl-settings', JSON.stringify({ selected: state.selected, username: state.username, javaPath: state.javaPath, proxyUrl: state.proxyUrl, gameDir: state.gameDir, memory: state.memory, optimize: state.optimize, jvmArgs: state.jvmArgs, gameArgs: state.gameArgs, theme: {bannerOpacity:theme.bannerOpacity,backgroundOpacity:theme.backgroundOpacity,backgroundFrost:theme.backgroundFrost,backgroundBlur:theme.backgroundBlur} }));
 const playerName = () => state.accountMode==='microsoft' && state.account ? state.account.name : state.username;
 const selected = () => state.versions.find(v => v.id === state.selected);
 function flash(message, kind = '') { state.notice = message; state.noticeKind = kind; renderChrome(); }
@@ -55,7 +114,7 @@ function shell() {
 }
 function home() {
  const v = selected();
- return `<section class="hero home-hero"><div class="hero-art"><div class="sun"></div><div class="cloud cloud-a"></div><div class="cloud cloud-b"></div><div class="mountain mountain-back"></div><div class="mountain mountain-mid"></div><div class="mountain mountain-front"></div><div class="ground"></div><div class="tree tree-a"><i></i></div><div class="tree tree-b"><i></i></div><div class="tree tree-c"><i></i></div><div class="art-grid"></div></div><div class="hero-shade"></div><div class="hero-content"><div class="hero-kicker">MINECRAFT · JAVA 版</div><h1>准备好，<em>出发。</em></h1><p>你的世界，在这里继续。</p></div></section>
+ return `<section class="hero home-hero"><div class="hero-art"><div class="sun"></div><div class="cloud cloud-a"></div><div class="cloud cloud-b"></div><div class="mountain mountain-back"></div><div class="mountain mountain-mid"></div><div class="mountain mountain-front"></div><div class="ground"></div><div class="tree tree-a"><i></i></div><div class="tree tree-b"><i></i></div><div class="tree tree-c"><i></i></div><div class="art-grid"></div><div class="hero-custom"></div></div><div class="hero-shade"></div><div class="hero-content"><div class="hero-kicker">MINECRAFT · JAVA 版</div><h1>准备好，<em>出发。</em></h1><p>你的世界，在这里继续。</p></div></section>
  <div class="section-title home-title"><h3>开始游戏</h3><button class="row-button log-link" data-action="open-log" ${!v?.installed ? 'disabled' : ''}>启动日志</button></div>
  <section class="launch-panel"><div class="launch-version"><div class="version-cube">${icon('blocks', 23)}</div><div><small>当前版本</small><strong>${v ? esc(v.name || v.id) : '选择一个版本'}</strong><span>${v?.installed ? `${esc(v.kind)} · 已安装` : '先在版本管理中安装游戏'}</span></div></div><button class="change-version" data-page="versions">切换版本 ${icon('chevron-down', 15)}</button><button class="play-button" data-action="launch" ${!v?.installed ? 'disabled' : ''}>${icon('play', 18)} 启动游戏</button></section>`;
 }
@@ -125,7 +184,7 @@ function installDialog() {
 }
 function settingsPage() {
  return `<div class="page-heading inner-heading"><div><h1>启动设置</h1><p>调整游戏运行环境与启动参数。</p></div></div>
- <form id="settings-form"><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('user-round', 20)}</div><div><span class="section-index">01 / PLAYER</span><h3>玩家身份</h3><p>设置用于启动游戏的离线玩家名称。</p></div></div><div class="field"><label for="username">玩家名称 <span>1–16 位字母、数字或下划线</span></label><input id="username" name="username" value="${esc(state.username)}" maxlength="16" required pattern="[A-Za-z0-9_]{1,16}"><p>离线玩家名称；正版账户请在“账户与外观”中登录。</p><button class="text-link" type="button" data-page="account">打开账户与外观 →</button></div></section>
+ ${appearanceSettings()}<form id="settings-form"><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('user-round', 20)}</div><div><span class="section-index">01 / PLAYER</span><h3>玩家身份</h3><p>设置用于启动游戏的离线玩家名称。</p></div></div><div class="field"><label for="username">玩家名称 <span>1–16 位字母、数字或下划线</span></label><input id="username" name="username" value="${esc(state.username)}" maxlength="16" required pattern="[A-Za-z0-9_]{1,16}"><p>离线玩家名称；正版账户请在“账户与外观”中登录。</p><button class="text-link" type="button" data-page="account">打开账户与外观 →</button></div></section>
  <section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('monitor', 20)}</div><div><span class="section-index">02 / ENVIRONMENT</span><h3>游戏环境</h3><p>配置 Java 和游戏文件的存放位置。</p></div></div><div class="field"><label for="javaPath">Java 可执行文件 <span>JAVA PATH</span></label><input id="javaPath" name="javaPath" value="${esc(state.javaPath)}" required><p>使用系统 PATH 中的 java，或填写完整路径。请根据游戏版本选择对应的 Java，或前往 Java 管理下载。</p><button class="text-link" type="button" data-page="java">打开 Java 管理 →</button></div><div class="field"><label for="gameDir">游戏目录 <span>GAME DIRECTORY</span></label><input id="gameDir" name="gameDir" value="${esc(state.gameDir)}" required><p>下载的版本、资源和游戏存档将保存在这里。</p></div><div class="field memory-field"><label for="memory">最大内存 <span>${esc(state.memory)} MB</span></label><input id="memory" name="memory" type="range" min="512" max="16384" step="512" value="${esc(state.memory)}"><div class="range-labels"><span>512 MB</span><span>16 GB</span></div></div></section><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('zap',20)}</div><div><span class="section-index">03 / LAUNCH OPTIONS</span><h3>启动参数</h3><p>按需调整 Java 和游戏启动方式。</p></div></div><div class="field"><label class="option-check"><input name="optimize" type="checkbox" ${state.optimize ? 'checked' : ''}> 启用 G1 垃圾回收优化</label><p>使用 Java 内置的 G1GC；自定义 JVM 参数可覆盖或补充设置。</p></div><div class="field"><label for="jvmArgs">自定义 JVM 参数 <span>JVM ARGUMENTS</span></label><input id="jvmArgs" name="jvmArgs" value="${esc(state.jvmArgs)}" placeholder="例如 -XX:MaxGCPauseMillis=100"><p>用空格分隔，带空格的值可用引号包裹。</p></div><div class="field"><label for="gameArgs">自定义游戏参数 <span>GAME ARGUMENTS</span></label><input id="gameArgs" name="gameArgs" value="${esc(state.gameArgs)}" placeholder="例如 --width 1280 --height 720"></div></section><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('globe-2', 20)}</div><div><span class="section-index">03 / NETWORK</span><h3>网络代理</h3><p>下载游戏、Java 和模组时使用的连接方式。</p></div></div><div class="field"><label for="proxyUrl">手动代理地址 <span>留空时使用系统代理</span></label><input id="proxyUrl" name="proxyUrl" value="${esc(state.proxyUrl)}" placeholder="例如 http://127.0.0.1:7890"><p>支持 HTTP、HTTPS 和 SOCKS5；使用系统代理时请留空。代理地址不支持填写账号或密码。</p></div></section><div class="settings-actions"><p>设置保存在本设备上。</p><button class="save-button" type="submit">保存设置 ${icon('chevron-right', 16)}</button></div></form>`;
 }
 function contentPage() {
@@ -317,7 +376,7 @@ function render() {
   app.querySelector('.breadcrumbs strong').textContent = ({home:'启动游戏',versions:'版本管理',content:'模组与整合包',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'})[state.page];
   app.querySelector('.avatar').textContent = playerName().slice(0,1).toUpperCase(); app.querySelector('.profile strong').textContent = playerName(); app.querySelector('.profile small').textContent = state.accountMode==='microsoft' && state.account ? '微软账户' : '离线玩家';
  }
- renderedPage = state.page; renderChrome(); renderOverlay(); hydrateIcons(); hydrateThumbnails(); refreshPreview();
+ renderedPage = state.page; applyTheme(); renderChrome(); renderOverlay(); hydrateIcons(); hydrateThumbnails(); refreshPreview();
 }
 function updateSearchResults(kind) {
  const content=app.querySelector('.content');if(!content)return;
@@ -335,6 +394,8 @@ async function refresh() {
 }
 app.addEventListener('pointerdown', event => { const edge=event.target.closest('[data-resize]'); if (edge && event.button===0 && isTauri()) getCurrentWindow().startResizeDragging(edge.dataset.resize).catch(e=>flash(`无法调整窗口大小：${e}`,'error')); });
 app.addEventListener('click', async event => {
+ const themeReset=event.target.closest('[data-theme-reset]');
+ if(themeReset) { const kind=themeReset.dataset.themeReset,revision=++imageRevision[kind];try { await imageStore('delete',kind);if(revision!==imageRevision[kind])return;setThemeImage(kind,null);flash('已恢复默认图片。'); } catch(e) { flash(`无法恢复默认图片：${e}`,'error'); } return; }
  const menuSummary=event.target.closest('.version-menu summary');
  app.querySelectorAll('.version-menu[open]').forEach(menu=>{ if(!menuSummary || menuSummary.parentElement!==menu) menu.open=false; });
  const windowControl=event.target.closest('[data-window]');
@@ -425,7 +486,13 @@ app.addEventListener('click', async event => {
  if (action === 'confirm-java-remove') { const java = state.javaRuntimes[state.javaDelete]; state.javaDelete = null; if (java?.managed) { try { await invoke('remove_java', { major: java.major }); if (state.javaPath === java.path) { state.javaPath = 'java'; persist(); } state.notice = `Java ${java.major} 已删除。`; state.noticeKind = ''; await refreshJava(); } catch (e) { flash(`删除失败：${e}`, 'error'); } } }
  if (action === 'launch') { const view={version:state.selected,phase:'preparing',error:''}; state.launchView=view; state.crash=null; renderOverlay(); try { await invoke('launch_game', { options: { version: state.selected, username: state.username, javaPath: state.javaPath, gameDir: state.gameDir, memory: Number(state.memory), optimize:state.optimize, jvmArgs:state.jvmArgs, gameArgs:state.gameArgs, accountMode:state.accountMode } }); if(state.launchView===view && view.phase==='preparing') { view.phase='started'; renderOverlay(); } } catch (e) { if(state.launchView===view) { view.phase='failed'; view.error=String(e); renderOverlay(); } else flash(`启动失败：${e}`, 'error'); } }
 });
-app.addEventListener('change', event => {
+app.addEventListener('change', async event => {
+ if(event.target.dataset.themeImage) {
+  const kind=event.target.dataset.themeImage,file=event.target.files?.[0];event.target.value='';if(!file)return;
+  const revision=++imageRevision[kind];
+  try { await validateThemeImage(file);if(revision!==imageRevision[kind])return;await imageStore('put',kind,file);if(revision!==imageRevision[kind])return;setThemeImage(kind,file);flash('图片已保存。'); }
+  catch(e) { flash(`无法使用图片：${e}`,'error'); } return;
+ }
  if(event.target.id==='server-status') { state.serverStatus=event.target.value;state.serverPage=0;updateSearchResults('server');return; }
  if(event.target.id==='skin-model') { state.skinModel=event.target.value;render();return; }
  if(event.target.id==='contentTarget') { state.contentTarget=event.target.value; state.contentResults=[]; state.localMods=[]; refreshMods(); return; }
@@ -435,10 +502,11 @@ app.addEventListener('change', event => {
 });
 app.addEventListener('compositionstart', event => { if(['server-search','version-filter'].includes(event.target.id)) composingSearch=true; });
 app.addEventListener('compositionend', event => { if(!['server-search','version-filter'].includes(event.target.id)) return; composingSearch=false; if(event.target.id==='server-search') {state.serverQuery=event.target.value;state.serverPage=0;} else state.versionQuery=event.target.value; if(pendingCompositionRender) {pendingCompositionRender=false;render();} else updateSearchResults(event.target.id==='server-search'?'server':'version'); });
-app.addEventListener('input', event => { if(event.target.id==='server-search') { if(composingSearch || event.isComposing) return; state.serverQuery=event.target.value;state.serverPage=0;updateSearchResults('server');return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { if(composingSearch || event.isComposing) return; state.versionQuery=event.target.value; updateSearchResults('version'); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if (event.target.id === 'memory') event.target.closest('.field').querySelector('label span').textContent = `${event.target.value} MB`; });
+app.addEventListener('input', event => { if(event.target.dataset.themeSetting) { const key=event.target.dataset.themeSetting;theme[key]=clampAppearance(event.target.value,appearanceDefaults[key],key==='backgroundBlur'?30:100);event.target.closest('.theme-control').querySelector('output').textContent=`${theme[key]}${key==='backgroundBlur'?' px':'%'}`;applyTheme();persist();return; } if(event.target.id==='server-search') { if(composingSearch || event.isComposing) return; state.serverQuery=event.target.value;state.serverPage=0;updateSearchResults('server');return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { if(composingSearch || event.isComposing) return; state.versionQuery=event.target.value; updateSearchResults('version'); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if (event.target.id === 'memory') event.target.closest('.field').querySelector('label span').textContent = `${event.target.value} MB`; });
 app.addEventListener('submit', async event => { if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey); await searchContent(); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory')), optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); render(); flash('设置已保存。'); if (changed) await refresh(); });
 async function init() {
  render();
+ restoreThemeImages();
  if (!isTauri()) { state.notice = '请在 Tauri 桌面应用中使用启动器。'; state.noticeKind = 'error'; render(); return; }
  try { await invoke('configure_proxy', { proxyUrl: state.proxyUrl }); if (!state.gameDir) state.gameDir = await invoke('default_game_dir'); await listen('java-progress', e => jobEvent(e.payload)); await listen('install-progress', e => jobEvent(e.payload)); await listen('game-exit', e => { if(!e.payload.success) { state.crash={version:e.payload.version,gameDir:e.payload.gameDir,logName:e.payload.logPath.split(/[\\/]/).pop()}; if(state.launchView?.version===e.payload.version) { state.launchView.phase='failed'; state.launchView.error=`游戏异常退出（代码 ${e.payload.code ?? '未知'}），可以打开启动日志查看详情。`; renderOverlay(); } else flash(`游戏 ${e.payload.version} 异常退出（代码 ${e.payload.code ?? '未知'}）。`,'error'); } else if(state.launchView?.version===e.payload.version) { state.launchView=null; renderOverlay(); } }); await refresh(); } catch (e) { flash(String(e), 'error'); }
 }
