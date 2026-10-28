@@ -171,7 +171,7 @@ fn configure_proxy(proxy_url: String) -> ResultT<()> {
 fn http_client() -> ResultT<reqwest::Client> {
     let proxy = MANUAL_PROXY.read().map_err(|_| "无法读取代理设置")?.clone();
     let mut builder = reqwest::Client::builder()
-        .user_agent("CCL/0.1.0")
+        .user_agent("CCL/0.1.1")
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(60));
     if let Some(proxy) = proxy {
@@ -883,13 +883,13 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
                 "legacy".into()
             },
         ),
-        ("version_type", "CCL 0.1.0".into()),
+        ("version_type", "CCL 0.1.1".into()),
         (
             "natives_directory",
             base_dir.join("natives").to_string_lossy().to_string(),
         ),
         ("launcher_name", "CCL".into()),
-        ("launcher_version", "0.1.0".into()),
+        ("launcher_version", "0.1.1".into()),
         ("classpath", cp.join(sep)),
         ("classpath_separator", sep.into()),
         (
@@ -959,7 +959,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     use std::io::Write;
     writeln!(
         log,
-        "CCL 0.1.0 | 游戏版本 {} | 启动时间 {}",
+        "CCL 0.1.1 | 游戏版本 {} | 启动时间 {}",
         options.version, stamp
     )
     .map_err(|e| e.to_string())?;
