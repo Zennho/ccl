@@ -1,0 +1,336 @@
+import './style.css';
+import './journal-theme.css';
+import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
+import { createIcons, Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks } from 'lucide';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { listen } from '@tauri-apps/api/event';
+import { getCurrentWindow } from '@tauri-apps/api/window';
+
+const icons = { Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks };
+const saved = JSON.parse(localStorage.getItem('ccl-settings') || '{}');
+const state = { page: 'home', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, versionQuery: '', accountMode: 'offline', account: null, browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentResults: [], contentBusy: false, localMods: [], modDelete: null, jobs: [], installDraft: null };
+const app = document.querySelector('#app');
+function hydrateIcons() { createIcons({ icons }); app.querySelectorAll('svg[data-lucide]').forEach(el => el.removeAttribute('data-lucide')); }
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const icon = (name, size = 18) => `<i data-lucide="${name}" width="${size}" height="${size}"></i>`;
+const persist = () => localStorage.setItem('ccl-settings', JSON.stringify({ selected: state.selected, username: state.username, javaPath: state.javaPath, proxyUrl: state.proxyUrl, gameDir: state.gameDir, memory: state.memory, optimize: state.optimize, jvmArgs: state.jvmArgs, gameArgs: state.gameArgs }));
+const playerName = () => state.accountMode==='microsoft' && state.account ? state.account.name : state.username;
+const selected = () => state.versions.find(v => v.id === state.selected);
+function flash(message, kind = '') { state.notice = message; state.noticeKind = kind; renderChrome(); }
+function shell() {
+  return `<div class="app-shell"><header class="window-bar"><div class="window-drag" data-tauri-drag-region><span class="window-kicker" data-tauri-drag-region>CCL</span><span class="window-separator" data-tauri-drag-region></span><span class="window-title" data-tauri-drag-region>MINECRAFT LAUNCHER</span></div><div class="window-controls"><button data-window="minimize" aria-label="最小化" title="最小化">${icon('minus',15)}</button><button data-window="maximize" aria-label="最大化或还原" title="最大化或还原">${icon('square',12)}</button><button data-window="close" class="window-close" aria-label="关闭" title="关闭">${icon('x',16)}</button></div></header><aside class="sidebar"><div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div><strong>CCL<span>.</span></strong><small>MINECRAFT 启动器</small></div></div>
+  <nav class="nav"><button data-page="home" class="${state.page === 'home' ? 'active' : ''}">${icon('layout-grid')}<span>启动游戏</span></button><button data-page="versions" class="${state.page === 'versions' ? 'active' : ''}">${icon('layers-3')}<span>版本管理</span></button><button data-page="content" class="${state.page === 'content' ? 'active' : ''}">${icon('blocks')}<span>模组与整合包</span></button><button data-page="downloads" class="${state.page === 'downloads' ? 'active' : ''}">${icon('download')}<span>下载任务</span><b class="job-badge">${activeJobCount() || ''}</b></button><button data-page="java" class="${state.page === 'java' ? 'active' : ''}">${icon('monitor')}<span>Java 管理</span></button><button data-page="account" class="${state.page === 'account' ? 'active' : ''}">${icon('user-round')}<span>账户与外观</span></button><button data-page="settings" class="${state.page === 'settings' ? 'active' : ''}">${icon('settings-2')}<span>启动设置</span></button></nav>
+  <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.0</span></div></div></aside>
+  <main class="main"><header class="topbar"><div class="breadcrumbs"><strong>${{home:'启动游戏',versions:'版本管理',content:'模组与整合包',downloads:'下载任务',java:'Java 管理',account:'账户与外观',settings:'启动设置'}[state.page]}</strong></div><div class="top-right"><div class="avatar">${esc(playerName().slice(0,1).toUpperCase())}</div><div class="profile"><strong>${esc(playerName())}</strong><small>${state.accountMode==='microsoft' && state.account ? '微软账户' : '离线玩家'}</small></div></div></header>
+  <div class="content">${state.page === 'home' ? home() : state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : settingsPage()}</div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
+}
+function home() {
+ const v = selected();
+ return `<section class="hero home-hero"><div class="hero-art"><div class="sun"></div><div class="cloud cloud-a"></div><div class="cloud cloud-b"></div><div class="mountain mountain-back"></div><div class="mountain mountain-mid"></div><div class="mountain mountain-front"></div><div class="ground"></div><div class="tree tree-a"><i></i></div><div class="tree tree-b"><i></i></div><div class="tree tree-c"><i></i></div><div class="art-grid"></div></div><div class="hero-shade"></div><div class="hero-content"><div class="hero-kicker">MINECRAFT · JAVA 版</div><h1>准备好，<em>出发。</em></h1><p>你的世界，在这里继续。</p></div></section>
+ <div class="section-title home-title"><h3>开始游戏</h3><button class="row-button log-link" data-action="open-log" ${!v?.installed ? 'disabled' : ''}>启动日志</button></div>
+ <section class="launch-panel"><div class="launch-version"><div class="version-cube">${icon('blocks', 23)}</div><div><small>当前版本</small><strong>${v ? esc(v.name || v.id) : '选择一个版本'}</strong><span>${v?.installed ? `${esc(v.kind)} · 已安装` : '先在版本管理中安装游戏'}</span></div></div><button class="change-version" data-page="versions">切换版本 ${icon('chevron-down', 15)}</button><button class="play-button" data-action="launch" ${!v?.installed ? 'disabled' : ''}>${icon('play', 18)} 启动游戏</button></section>`;
+}
+function versionsPage() {
+ const query=state.versionQuery.trim().toLowerCase();
+ const list=state.versions.filter(v=>!query || `${v.name || ''} ${v.id} ${v.kind}`.toLowerCase().includes(query));
+ return `<div class="page-heading inner-heading"><div><h1>版本管理</h1><p>选择游戏版本，安装加载器或管理游戏文件。</p></div><div class="heading-actions"><button class="outline-btn" data-action="import-game">${icon('folder-open',16)} 导入游戏</button><button class="outline-btn" data-action="refresh" ${state.loading ? 'disabled' : ''}>${icon('refresh-cw',16)} ${state.loading ? '正在获取' : '刷新'}</button></div></div>
+ <div class="version-toolbar"><div><strong>游戏版本</strong><span class="count">${list.length}</span></div><label class="version-search"><span class="sr-only">搜索版本</span><input id="version-filter" type="search" placeholder="搜索版本" value="${esc(state.versionQuery)}"></label></div>
+ <div class="version-list versions-list">${list.length ? list.map(v => `<div class="version-row"><div class="row-icon">${icon('box',18)}</div><div class="row-name"><strong>${esc(v.name || v.id)}</strong><span>${esc(v.kind)} ${v.released ? '· '+esc(v.released) : ''}</span></div><div class="row-state ${v.installed ? 'installed' : ''}"><span></span>${v.installed ? '已安装' : '可安装'}</div>${v.installed ? `<button class="row-button ${state.selected === v.id ? 'selected' : ''}" data-select="${esc(v.id)}">${state.selected === v.id ? '当前版本' : '选择版本'}</button><details class="version-menu"><summary aria-label="${esc(v.name || v.id)} 的更多操作" title="更多操作">${icon('more-horizontal',18)}</summary><div class="version-menu-items"><button data-open-version-folder="${esc(v.id)}">${icon('folder-open',15)} 游戏目录</button><button data-export-game="${esc(v.id)}">${icon('download',15)} 导出游戏</button>${v.kind === '正式版' ? `<button data-install="${esc(v.id)}">${icon('layers-3',15)} 配置安装</button>` : ''}</div></details>` : v.kind === '正式版' ? `<button class="row-button install-choice" data-install="${esc(v.id)}">${icon('download',14)} 安装</button>` : ''}</div>`).join('') : `<div class="empty-state">${icon('box',27)}<strong>${state.loading ? '正在获取版本列表…' : query ? '没有找到匹配的版本' : '还没有可显示的版本'}</strong><p>${query ? '试试其他关键词。' : '检查网络连接后刷新列表。'}</p></div>`}</div>`;
+}
+const ADDONS = [
+ { id:'fabric-api', title:'Fabric API', desc:'许多 Fabric 模组的基础依赖', loaders:['fabric'] },
+ { id:'sodium', title:'Sodium', desc:'改善渲染性能', loaders:['fabric','neoforge'] },
+ { id:'jei', title:'Just Enough Items', desc:'查看物品与配方', loaders:['fabric','quilt','forge','neoforge'] },
+ { id:'jade', title:'Jade', desc:'查看方块与实体信息', loaders:['fabric','quilt','forge','neoforge'] },
+];
+function installDialog() {
+ const d = state.installDraft; if (!d) return '';
+ const choices = [['vanilla','原版','不安装加载器'],['fabric','Fabric','轻量，更新及时'],['quilt','Quilt','基于 Fabric 生态'],['forge','Forge','广泛的模组支持'],['neoforge','NeoForge','Forge 生态分支']];
+ return `<div class="install-overlay" data-action="close-install-backdrop"><section class="install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-title"><div class="install-dialog-head"><div><span class="section-index">NEW INSTALL / JAVA EDITION</span><h2 id="install-title">安装 <em>${esc(d.version)}</em></h2><p>先选择运行方式，再按需添加常用模组。</p></div><button class="icon-button" data-action="close-install" aria-label="关闭">${icon('x',19)}</button></div>
+ <div class="install-section-heading"><span>01</span><div><strong>模组加载器</strong><small>选择一个与模组兼容的加载器</small></div></div><div class="loader-grid">${choices.map(([id,name,desc]) => `<label class="loader-card ${d.loader===id ? 'chosen' : ''}"><input type="radio" name="draftLoader" value="${id}" ${d.loader===id ? 'checked' : ''}><span class="choice-dot"></span><strong>${name}</strong><small>${desc}</small></label>`).join('')}</div>
+ <div class="install-section-heading"><span>02</span><div><strong>附加模组 <small>可选</small></strong><small>从 Modrinth 自动下载兼容版本及必需依赖</small></div></div><div class="addon-grid">${ADDONS.map(a => { const available=a.loaders.includes(d.loader); return `<label class="addon-option ${available ? '' : 'unavailable'}"><input type="checkbox" name="draftAddon" value="${a.id}" ${d.addons.includes(a.id) ? 'checked' : ''} ${available ? '' : 'disabled'}><span><strong>${esc(a.title)}</strong><small>${esc(a.desc)}</small></span></label>`; }).join('')}</div><p class="install-note">${d.loader==='vanilla' ? '选择加载器后即可添加模组。' : '若所选模组没有兼容的版本，任务会显示具体原因。'}</p>
+ <div class="install-actions"><button class="outline-btn" data-action="close-install">取消</button><button class="save-button" data-action="confirm-install">加入下载任务 ${icon('chevron-right',16)}</button></div></section></div>`;
+}
+function settingsPage() {
+ return `<div class="page-heading inner-heading"><div><h1>启动设置</h1><p>调整游戏运行环境与启动参数。</p></div></div>
+ <form id="settings-form"><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('user-round', 20)}</div><div><span class="section-index">01 / PLAYER</span><h3>玩家身份</h3><p>设置用于启动游戏的离线玩家名称。</p></div></div><div class="field"><label for="username">玩家名称 <span>1–16 位字母、数字或下划线</span></label><input id="username" name="username" value="${esc(state.username)}" maxlength="16" required pattern="[A-Za-z0-9_]{1,16}"><p>离线玩家名称；正版账户请在“账户与外观”中登录。</p><button class="text-link" type="button" data-page="account">打开账户与外观 →</button></div></section>
+ <section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('monitor', 20)}</div><div><span class="section-index">02 / ENVIRONMENT</span><h3>游戏环境</h3><p>配置 Java 和游戏文件的存放位置。</p></div></div><div class="field"><label for="javaPath">Java 可执行文件 <span>JAVA PATH</span></label><input id="javaPath" name="javaPath" value="${esc(state.javaPath)}" required><p>使用系统 PATH 中的 java，或填写完整路径。请根据游戏版本选择对应的 Java，或前往 Java 管理下载。</p><button class="text-link" type="button" data-page="java">打开 Java 管理 →</button></div><div class="field"><label for="gameDir">游戏目录 <span>GAME DIRECTORY</span></label><input id="gameDir" name="gameDir" value="${esc(state.gameDir)}" required><p>下载的版本、资源和游戏存档将保存在这里。</p></div><div class="field memory-field"><label for="memory">最大内存 <span>${esc(state.memory)} MB</span></label><input id="memory" name="memory" type="range" min="512" max="16384" step="512" value="${esc(state.memory)}"><div class="range-labels"><span>512 MB</span><span>16 GB</span></div></div></section><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('zap',20)}</div><div><span class="section-index">03 / LAUNCH OPTIONS</span><h3>启动参数</h3><p>按需调整 Java 和游戏启动方式。</p></div></div><div class="field"><label class="option-check"><input name="optimize" type="checkbox" ${state.optimize ? 'checked' : ''}> 启用 G1 垃圾回收优化</label><p>使用 Java 内置的 G1GC；自定义 JVM 参数可覆盖或补充设置。</p></div><div class="field"><label for="jvmArgs">自定义 JVM 参数 <span>JVM ARGUMENTS</span></label><input id="jvmArgs" name="jvmArgs" value="${esc(state.jvmArgs)}" placeholder="例如 -XX:MaxGCPauseMillis=100"><p>用空格分隔，带空格的值可用引号包裹。</p></div><div class="field"><label for="gameArgs">自定义游戏参数 <span>GAME ARGUMENTS</span></label><input id="gameArgs" name="gameArgs" value="${esc(state.gameArgs)}" placeholder="例如 --width 1280 --height 720"></div></section><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('globe-2', 20)}</div><div><span class="section-index">03 / NETWORK</span><h3>网络代理</h3><p>下载游戏、Java 和模组时使用的连接方式。</p></div></div><div class="field"><label for="proxyUrl">手动代理地址 <span>留空时使用系统代理</span></label><input id="proxyUrl" name="proxyUrl" value="${esc(state.proxyUrl)}" placeholder="例如 http://127.0.0.1:7890"><p>支持 HTTP、HTTPS 和 SOCKS5；使用系统代理时请留空。代理地址不支持填写账号或密码。</p></div></section><div class="settings-actions"><p>设置保存在本设备上。</p><button class="save-button" type="submit">保存设置 ${icon('chevron-right', 16)}</button></div></form>`;
+}
+function contentPage() {
+ const count = n => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n;
+ return `<div class="page-heading inner-heading"><div><h1>模组与整合包</h1><p>选择目标版本，搜索并安装兼容的内容。</p></div></div>
+ <section class="content-search">${state.contentKind==='mod' ? `<label class="target-select">安装到已安装的游戏版本<select id="contentTarget" ${state.contentBusy ? 'disabled' : ''}><option value="">选择目标版本</option>${state.versions.filter(v=>v.installed).map(v=>`<option value="${esc(v.id)}" ${state.contentTarget===v.id?'selected':''}>${esc(v.name || v.id)}</option>`).join('')}</select></label>` : ''}<form id="content-form"><div class="content-selects"><label>内容来源<select name="source" ${state.contentBusy ? 'disabled' : ''}><option value="modrinth" ${state.contentSource === 'modrinth' ? 'selected' : ''}>Modrinth</option><option value="curseforge" ${state.contentSource === 'curseforge' ? 'selected' : ''}>CurseForge</option></select></label><label>内容类型<select name="kind" ${state.contentBusy ? 'disabled' : ''}><option value="mod" ${state.contentKind === 'mod' ? 'selected' : ''}>模组</option><option value="modpack" ${state.contentKind === 'modpack' ? 'selected' : ''}>整合包</option></select></label></div>${state.contentSource === 'curseforge' ? `<label class="content-key">CurseForge API Key<input type="password" name="apiKey" ${state.contentBusy ? 'disabled' : ''} value="${esc(state.contentKey)}" placeholder="输入 API Key（仅当前会话保存）" autocomplete="off"></label>` : ''}<div class="content-search-row"><input name="query" ${state.contentBusy ? 'disabled' : ''} value="${esc(state.contentQuery)}" placeholder="搜索模组或整合包"><button class="save-button" type="submit" ${state.contentBusy ? 'disabled' : ''}>搜索 ${icon('chevron-right',16)}</button></div></form><p>${state.contentKind === 'mod' ? '只显示与目标版本和加载器兼容的模组。' : '整合包将创建独立游戏目录。'}</p></section>
+
+ <div class="section-title"><div><span class="section-index">01 / DISCOVER</span><h3>搜索结果 <span class="count">${state.contentResults.length}</span></h3></div><span class="section-note">${state.contentSource === 'modrinth' ? 'Modrinth' : 'CurseForge'}</span></div><div class="version-list">${state.contentResults.length ? state.contentResults.map((hit,i) => `<div class="version-row content-row"><div class="row-icon">${icon(state.contentKind === 'mod' ? 'blocks' : 'box',19)}</div><div class="row-name"><strong>${esc(hit.title)}</strong><span>${esc(hit.description)}</span><span>${esc(hit.author)} · ${count(hit.downloads)} 次下载</span></div><button class="row-button ${hit.installed ? 'selected' : ''}" data-content-install="${i}" ${state.contentBusy || (state.contentKind==='mod' && hit.installed) ? 'disabled' : ''}>${hit.installed && state.contentKind==='mod' ? '已安装' : `${icon('download',14)} ${state.contentKind==='mod' ? '选择版本' : '安装'}`}</button></div>`).join('') : `<div class="empty-state">${icon('compass',27)}<strong>搜索你感兴趣的内容</strong><p>选择来源和类型后输入关键词，或直接浏览热门结果。</p></div>`}</div>
+ <div class="section-title"><div><span class="section-index">02 / INSTALLED MODS</span><h3>当前实例模组 <span class="count">${state.localMods.length}</span></h3></div><span class="section-note">${esc(state.contentTarget || '未选择游戏版本')}</span></div><div class="version-list">${state.localMods.length ? state.localMods.map((m,i) => `<div class="version-row"><div class="row-icon">${icon('blocks',19)}</div><div class="row-name"><strong class="java-path">${esc(m.name)}</strong><span>${m.enabled ? '已启用' : '已停用'}</span></div><button class="row-button" data-mod-toggle="${i}" ${state.contentBusy ? 'disabled' : ''}>${m.enabled ? '停用' : '启用'}</button><button class="row-button danger-button" data-mod-remove="${i}" ${state.contentBusy ? 'disabled' : ''}>删除</button></div>`).join('') : `<div class="empty-state">${icon('box',27)}<strong>当前实例没有模组</strong><p>在上方搜索并安装兼容的模组。</p></div>`}</div>
+ ${state.modDelete !== null && state.localMods[state.modDelete] ? `<div class="confirm-overlay"><div class="confirm-box"><span class="section-index">REMOVE MOD</span><h3>删除模组？</h3><p>${esc(state.localMods[state.modDelete].name)} 将从当前实例删除。</p><div><button class="row-button" data-action="cancel-mod-remove">取消</button><button class="row-button danger-button" data-action="confirm-mod-remove">确认删除</button></div></div></div>` : ''}`;
+}
+async function refreshMods() {
+ const version=state.contentTarget, gameDir=state.gameDir;
+ if (!version) { state.localMods = []; if(state.page==='content') render(); return; }
+ try { const mods=await invoke('list_mods',{gameDir,version}); if(version===state.contentTarget && gameDir===state.gameDir) state.localMods=mods; }
+ catch (e) { if(version===state.contentTarget) { state.localMods=[]; state.notice=`读取模组失败：${e}`; state.noticeKind='error'; } }
+ if (state.page==='content' && version===state.contentTarget) render();
+}
+async function searchContent() {
+ if(state.contentKind==='mod' && !state.contentTarget) { flash('请先选择已安装的游戏版本。','error'); return; }
+ const snapshot={source:state.contentSource,kind:state.contentKind,query:state.contentQuery,apiKey:state.contentKey,gameDir:state.gameDir,version:state.contentTarget};
+ state.contentBusy=true; render();
+ try { const results=await invoke('search_content',snapshot); if(snapshot.version===state.contentTarget && snapshot.kind===state.contentKind && snapshot.source===state.contentSource) state.contentResults=results; }
+ catch(e) { state.notice=`搜索失败：${e}`; state.noticeKind='error'; state.contentResults=[]; }
+ state.contentBusy=false; render();
+}
+function modVersionDialog() {
+ const d=state.modDraft; if(!d) return '';
+ return `<div class="install-overlay" data-action="close-mod-backdrop"><section class="install-dialog mod-dialog" role="dialog" aria-modal="true" aria-labelledby="mod-dialog-title"><div class="install-dialog-head"><div><span class="section-index">MOD VERSION / ${esc(d.source)}</span><h2 id="mod-dialog-title">${esc(d.title)}</h2><p>安装到 ${esc(d.target)} · 自动安装必需依赖</p></div><button class="icon-button" data-action="close-mod-dialog" aria-label="关闭">${icon('x',19)}</button></div><div class="install-section-heading"><span>01</span><div><strong>选择模组版本</strong><small>仅显示兼容目标游戏版本和加载器的版本</small></div></div>${d.loading?'<div class="empty-state">正在获取兼容版本…</div>':d.error?`<div class="empty-state">${esc(d.error)}</div>`:d.versions.length?`<div class="mod-version-list">${d.versions.map((v,i)=>`<label class="mod-version-option"><input type="radio" name="modVersion" value="${esc(v.id)}" ${i===0?'checked':''}><span><strong>${esc(v.name)}</strong><small>${esc(v.number)} · ${esc(v.date)}</small></span></label>`).join('')}</div>`:'<div class="empty-state">没有找到兼容版本</div>'}<div class="install-actions"><button class="outline-btn" data-action="close-mod-dialog">取消</button><button class="save-button" data-action="confirm-mod-install" ${d.loading||d.error||!d.versions.length?'disabled':''}>加入下载任务 ${icon('chevron-right',16)}</button></div></section></div>`;
+}
+function archiveDialog() {
+ const d=state.archiveDraft; if(!d) return '';
+ if(d.kind==='export') return `<div class="install-overlay" data-action="close-archive-backdrop"><section class="install-dialog archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-title"><div class="install-dialog-head"><div><span class="section-index">EXPORT / GAME INSTANCE</span><h2 id="archive-title">导出 <em>${esc(d.version)}</em></h2><p>将游戏数据打包，方便在 CCL 中重新导入。</p></div><button class="icon-button" data-action="close-archive" aria-label="关闭">${icon('x',19)}</button></div><div class="archive-details"><p>包含模组、模组配置、游戏设置、资源包和启动参数。导入时将联网获取游戏与加载器。</p><label class="archive-check"><input type="checkbox" id="archive-saves"><span><strong>包含世界存档</strong><small>存档可能较大；未勾选时不会导出 saves 文件夹。</small></span></label><p class="archive-hint">日志、截图和启动器账号不会打包。共用游戏目录的版本会导出该目录中的模组和配置。</p></div><div class="install-actions"><button class="outline-btn" data-action="close-archive">取消</button><button class="save-button" data-action="confirm-export">选择位置并导出 ${icon('chevron-right',16)}</button></div></section></div>`;
+ const m=d.manifest;
+ return `<div class="install-overlay" data-action="close-archive-backdrop"><section class="install-dialog archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-title"><div class="install-dialog-head"><div><span class="section-index">IMPORT / GAME INSTANCE</span><h2 id="archive-title">导入 <em>${esc(m.name)}</em></h2><p>创建独立游戏目录，不覆盖已有版本。</p></div><button class="icon-button" data-action="close-archive" aria-label="关闭">${icon('x',19)}</button></div><div class="archive-details"><div class="archive-summary"><div><small>游戏版本</small><strong>${esc(m.gameVersion)}</strong></div><div><small>加载器</small><strong>${esc(m.loader==='vanilla'?'原版':m.loader)} ${esc(m.loaderVersion || '')}</strong></div><div><small>世界存档</small><strong>${m.includeSaves?'包含':'不包含'}</strong></div></div><p>导入时会联网获取游戏本体和加载器；模组及配置来自导出包。Forge 系列需要可用的 Java。</p>${m.launchSettings?`<label class="archive-check"><input type="checkbox" id="archive-settings"><span><strong>同时导入启动参数</strong><small>将覆盖启动器当前的内存、优化和自定义参数设置。</small></span></label>`:''}</div><div class="install-actions"><button class="outline-btn" data-action="close-archive">取消</button><button class="save-button" data-action="confirm-import">加入导入任务 ${icon('chevron-right',16)}</button></div></section></div>`;
+}
+function launchScreen() {
+ const v=state.launchView; if(!v) return '';
+ const phase=v.phase, failed=phase==='failed', started=phase==='started';
+ return `<div class="launch-screen" role="status" aria-live="polite"><div class="launch-screen-art"><div class="launch-orbit"></div><div class="launch-pixel p1"></div><div class="launch-pixel p2"></div><div class="launch-pixel p3"></div><div class="launch-pixel p4"></div><div class="launch-screen-mark">CCL<span>.</span></div></div><div class="launch-screen-copy"><span class="section-index">YOUR ADVENTURE / ${esc(v.version)}</span><h2>${failed?'启动遇到问题':started?'游戏进程已启动':'正在准备游戏'}</h2><p>${failed?esc(v.error):started?'正在等待游戏加载，请在游戏窗口中查看。':'正在准备参数并启动 Java，请稍候。'}</p><div class="launch-progress ${failed?'failed':started?'waiting':'preparing'}"><i></i></div><div class="launch-progress-caption">${failed?'请查看错误信息或启动日志':started?'加载动画 · 游戏实际进度由游戏窗口显示':'准备启动'}</div><div class="launch-screen-actions">${failed&&state.crash?'<button class="save-button" data-action="open-crash-log">打开启动日志</button>':''}<button class="outline-btn" data-action="close-launch-view">返回启动器</button></div></div></div>`;
+}
+function accountPage() {
+ const signed=!!state.account, online=state.accountMode==='microsoft' && signed;
+ const localSkin=state.localSkin, localCape=state.localCape, capes=state.appearance?.capes || [];
+ const hasSkin=!!(localSkin?.data || state.appearance?.skin);
+ return `<div class="page-heading inner-heading"><div><h1>账户与外观</h1><p>登录正版账户，预览和管理角色外观。</p></div></div>
+ <div class="identity-layout"><div class="identity-main"><section class="identity-card"><div class="identity-section-head"><div><h2>玩家账户</h2><p>${online ? '当前使用微软正版账户。' : '当前使用离线账户。'}</p></div><span class="identity-status ${online?'online':''}">${online?'正版':'离线'}</span></div>
+ <div class="identity-account"><div class="identity-user-icon">${icon('user-round',20)}</div><div><strong>${esc(online?state.account.name:state.username)}</strong><small>${online ? `Minecraft Java · ${esc(state.account.uuid)}` : '离线模式'}</small></div></div>
+ <div class="identity-actions">${signed ? `<button class="row-button ${!online?'selected':''}" data-action="use-offline">使用离线账户</button><button class="row-button ${online?'selected':''}" data-action="use-microsoft">使用 ${esc(state.account.name)}</button><button class="row-button danger-button" data-action="logout-microsoft" ${state.accountBusy?'disabled':''}>退出登录</button>` : `<button class="save-button" data-action="begin-login" ${state.accountBusy?'disabled':''}>微软账户登录</button>`}</div>
+ ${!signed && state.loginAttempt ? `<div class="browser-login-panel"><div class="browser-login-icon">${icon('globe-2',20)}</div><div><strong>${state.browserPrompt ? (state.browserPrompt.opened?'请在浏览器中登录':'无法自动打开浏览器') : '正在准备登录…'}</strong><p>${state.browserPrompt ? (state.browserPrompt.opened?'完成微软授权后，将自动返回启动器。':'请检查系统默认浏览器，然后重试。') : '正在启动系统浏览器。'}</p><div class="identity-actions">${state.browserPrompt?'<button class="row-button" data-action="open-microsoft-login">重新打开浏览器</button>':''}<button class="row-button" data-action="cancel-login">取消登录</button></div></div></div>` : ''}</section>
+ <section class="identity-card"><div class="identity-section-head"><div><h2>皮肤</h2><p>选择 PNG 文件预览，登录后可应用到正版账户。</p></div><button class="row-button" data-action="choose-skin" ${state.accountBusy?'disabled':''}>选择皮肤</button></div><div class="skin-controls"><div class="skin-source"><strong>${esc(localSkin?.name || (state.appearance?.skin ? '当前账户皮肤' : signed ? '账户默认皮肤' : '尚未选择皮肤'))}</strong><small>${localSkin?'本地预览 · 尚未应用':state.appearance?.skin?'已从账户加载':signed?'暂无可预览的纹理':'请选择皮肤图片'}</small></div><label>模型<select id="skin-model"><option value="classic" ${state.skinModel==='classic'?'selected':''}>标准</option><option value="slim" ${state.skinModel==='slim'?'selected':''}>纤细</option></select></label>${localSkin?`<button class="row-button" data-action="clear-skin">清除预览</button><button class="save-button" data-action="upload-skin" ${!signed||state.accountBusy?'disabled':''}>应用到正版账户</button>`:''}</div><p class="identity-note">支持 64×64 或 64×32 PNG。离线模式的本地预览不会改变游戏内皮肤。</p>${signed?`<button class="text-link" data-action="reset-skin" ${state.accountBusy?'disabled':''}>恢复账户默认皮肤</button>`:''}</section>
+ <section class="identity-card"><div class="identity-section-head"><div><h2>披风</h2><p>切换账户已有披风，或预览本地图片。</p></div><button class="row-button" data-action="choose-cape" ${state.accountBusy?'disabled':''}>预览本地披风</button></div>${localCape?`<div class="local-cape"><span>${esc(localCape.name)} · 仅预览</span><button class="row-button" data-action="clear-cape">清除预览</button></div>`:''}<div class="cape-list">${signed ? capes.length ? capes.map((cape,i)=>`<div class="cape-row ${state.previewCapeId===cape.id&&!localCape?'cape-previewed':''}"><div><strong>${esc(cape.name)}</strong><small>${cape.active?'当前使用':''}</small></div><button class="row-button" data-preview-cape="${i}" ${!cape.texture?'disabled':''}>预览</button><button class="row-button ${cape.active?'selected':''}" data-apply-cape="${i}" ${cape.active||state.accountBusy?'disabled':''}>${cape.active?'已使用':'使用'}</button></div>`).join('') : '<p class="identity-empty">账户暂无可用披风。</p>' : '<p class="identity-empty">登录后可管理账户拥有的披风。</p>'}</div>${signed && capes.some(c=>c.active)?`<button class="text-link" data-action="hide-cape" ${state.accountBusy?'disabled':''}>不使用披风</button>`:''}<p class="identity-note">正版披风由 Minecraft 账户授予，本地图片仅用于预览。</p></section></div>
+ <aside class="identity-preview"><div class="preview-headline"><strong>角色预览</strong><span>${state.skinModel==='slim'?'纤细':'标准'}模型</span></div><div class="preview-stage"><canvas id="skin-preview" aria-label="Minecraft 角色皮肤与披风预览" ${hasSkin?'':'hidden'}></canvas><div class="preview-empty" ${hasSkin?'hidden':''}>${localCape || state.previewCapeId ? '请先选择皮肤以预览披风' : '选择皮肤后显示预览'}</div><div class="preview-fallback" hidden>当前环境无法显示预览</div></div><p class="preview-caption">${hasSkin ? `拖动角色可旋转 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}` : '暂无皮肤预览'}</p></aside></div>`;
+}
+let viewer=null, previewGeneration=0;
+function refreshPreview() {
+ const generation=++previewGeneration;
+ if(viewer) { viewer.dispose(); viewer=null; }
+ const canvas=app.querySelector('#skin-preview'); if(!canvas) return;
+ const cape=state.localCape?.data || state.appearance?.capes?.find(c=>c.id===state.previewCapeId)?.texture || null;
+ const skin=state.localSkin?.data || state.appearance?.skin || null;
+ if(!skin) return;
+ import('./appearance-preview.js').then(m=>m.createAppearancePreview(canvas,skin,cape,state.skinModel)).then(next=>{if(generation!==previewGeneration) next.dispose(); else { viewer=next; if(next.is2d) { const caption=app.querySelector('.preview-caption'); if(caption) caption.textContent=`2D 预览 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}`; } }}).catch(()=>{if(generation===previewGeneration) { const el=app.querySelector('.preview-fallback'); if(el) el.hidden=false; }});
+}
+async function refreshAppearance() {
+ const accountId=state.account?.uuid; if(!accountId) return;
+ try { const result=await invoke('get_appearance'); if(state.account?.uuid!==accountId) return; state.appearance=result; state.skinModel=result.model==='slim'?'slim':'classic'; state.previewCapeId=result.capes.find(c=>c.active)?.id || ''; }
+ catch(e) { if(state.account?.uuid!==accountId) return; state.appearance=null; flash(`无法获取账户外观：${e}`,'error'); }
+ if(state.page==='account') render();
+}
+function downloadsPage() {
+ const running = state.jobs.filter(j=>j.status==='running').length;
+ return `<div class="page-heading inner-heading"><div><h1>下载任务</h1><p>${running} 个任务进行中，最多同时运行 3 个。</p></div><button class="outline-btn" data-action="clear-jobs">清除已完成</button></div>
+ <div class="section-title"><div><h3>任务列表 <span class="count">${state.jobs.length}</span></h3></div></div><div id="job-list">${jobList()}</div>`;
+}
+function jobList() {
+ if (!state.jobs.length) return `<div class="empty-state job-empty">${icon('download',27)}<strong>还没有下载任务</strong><p>选择游戏、Java 或模组后即可加入任务列表。</p></div>`;
+ return state.jobs.slice().reverse().map(job => {
+  const labels={queued:'等待中',running:'下载中',done:'已完成',failed:'失败'};
+  const percent=job.total ? Math.min(100,Math.round(job.current/job.total*100)) : 0;
+  return `<article class="job-card ${job.status}" data-job-id="${esc(job.id)}"><div class="job-top"><div class="job-icon">${icon(job.kind==='java' ? 'monitor' : job.kind==='mod' ? 'blocks' : 'box',18)}</div><div class="job-info"><strong>${esc(job.title)}</strong><small class="job-message">${esc(job.message || labels[job.status])}</small></div><span class="job-state">${labels[job.status]}</span></div><div class="job-progress-line"><div class="progress-track"><i class="job-track" style="width:${job.status==='done' ? 100 : percent}%"></i></div><span class="job-count">${job.total ? `${job.current} / ${job.total}` : (job.status==='queued' ? '排队中' : job.status==='done' ? '完成' : '—')}</span></div>${job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${job.status==='failed' ? `<div class="job-actions"><button class="row-button" data-retry-job="${esc(job.id)}">${icon('refresh-cw',14)} 重试</button></div>` : ''}</article>`;
+ }).join('');
+}
+function renderJobList() { const list=app.querySelector('#job-list'); if (list) { list.innerHTML=jobList(); hydrateIcons(); } renderChrome(); }
+function updateJob(job, patch) {
+ Object.assign(job,patch);
+ const card=app.querySelector(`[data-job-id="${job.id}"]`);
+ if (card) { const message=card.querySelector('.job-message'); if (message) message.textContent=job.message || ''; const count=card.querySelector('.job-count'); if (count) count.textContent=job.total ? `${job.current} / ${job.total}` : '—'; const track=card.querySelector('.job-track'); if (track) track.style.width=job.total ? `${Math.min(100,Math.round(job.current/job.total*100))}%` : '0%'; }
+}
+async function refreshInstalled(dir) {
+ if (dir !== state.gameDir) return;
+ try {
+  const installed=await invoke('installed_versions',{gameDir:dir}); const byId=new Map(installed.map(v=>[v.id,v]));
+  if (state.online) { const known=new Set(state.versions.map(v=>v.id)); const extra=installed.filter(v=>!known.has(v.id)); state.versions=[...extra,...state.versions.map(v=>v.kind==='正式版'?{...v,installed:byId.has(v.id)}:byId.get(v.id)).filter(Boolean)]; }
+  else state.versions=installed;
+  if (!state.selected) { state.selected=installed[0]?.id || ''; persist(); }
+  if (state.page==='versions' || state.page==='home') render(); else renderChrome();
+ } catch (e) { flash(`无法刷新已安装版本：${e}`,'error'); }
+}
+let jobSerial=0;
+function hasJob(key) { return state.jobs.some(j=>j.key===key && (j.status==='queued'||j.status==='running')); }
+function enqueueJob(spec) {
+ if (hasJob(spec.key)) { flash('该项目已在下载任务中。'); return; }
+ const job={...spec,id:`job-${Date.now()}-${++jobSerial}`,status:'queued',message:'等待中',current:0,total:0,error:''};
+ state.jobs.push(job); renderJobList(); flash(`已加入下载任务：${job.title}`); pumpJobs();
+}
+function pumpJobs() {
+ while (state.jobs.filter(j=>j.status==='running').length < 3) {
+  const job=state.jobs.find(j=>j.status==='queued'); if (!job) break;
+  job.status='running'; job.message='正在准备'; renderJobList();
+  Promise.resolve().then(()=>job.run(job)).then(()=>{ job.status='done'; job.message=job.kind==='export'?'导出完成':job.kind==='import'?'导入完成':'安装完成'; job.current=job.total; }).catch(e=>{ job.status='failed'; job.message=job.kind==='export'?'导出失败':job.kind==='import'?'导入失败':'安装失败'; job.error=String(e); }).finally(async()=>{
+   if (job.gameDir) await refreshInstalled(job.gameDir);
+   if (job.kind==='java') { try { state.javaRuntimes=await invoke('list_java'); if(state.page==='java') render(); } catch {} }
+   if (job.kind==='mod' && state.page==='content' && job.version===state.contentTarget && job.gameDir===state.gameDir) { await refreshMods(); await searchContent(); }
+   renderJobList(); pumpJobs();
+  });
+ }
+}
+function jobEvent(payload) {
+ const job=state.jobs.find(j=>j.id===payload.jobId); if (!job || job.status!=='running') return;
+ const divisor=job.kind==='java' ? 1048576 : 1;
+ updateJob(job,{message:payload.message,current:divisor===1 ? payload.current : Number((payload.current/divisor).toFixed(1)),total:divisor===1 ? payload.total : Number((payload.total/divisor).toFixed(1))});
+ const card=app.querySelector(`[data-job-id="${job.id}"] .job-count`); if (card && job.kind==='java' && job.total) card.textContent=`${job.current} / ${job.total} MB`;
+}
+function queueVersion(draft) {
+ const gameDir=state.gameDir, javaPath=state.javaPath, selectedVersion=draft.version;
+ const key=`game:${gameDir}:${selectedVersion}:${draft.loader}`;
+ enqueueJob({key,kind:'game',title:`Minecraft ${selectedVersion}${draft.loader==='vanilla'?'':` · ${draft.loader}`}`,gameDir,run:async job=>{
+  await invoke('install_version',{version:selectedVersion,gameDir,jobId:job.id});
+  const result=draft.loader==='vanilla' ? selectedVersion : await invoke('install_loader',{gameVersion:selectedVersion,gameDir,loader:draft.loader,loaderVersion:null,javaPath,jobId:job.id});
+  job.resultVersion=result;
+  for (let i=0;i<draft.addons.length;i++) { updateJob(job,{message:`正在安装附加模组 ${draft.addons[i]}（${i+1}/${draft.addons.length}）`,current:0,total:0}); try { await invoke('install_mod',{gameDir,version:result,source:'modrinth',projectId:draft.addons[i],apiKey:'',modVersionId:null,jobId:job.id}); } catch(e) { throw `游戏和加载器已安装；附加模组 ${draft.addons[i]} 安装失败：${e}`; } }
+ }});
+}
+function javaPage() {
+ const runtimes = state.javaRuntimes;
+ const options = [8, 17, 21, 25];
+ const mb = n => (n / 1048576).toFixed(1) + ' MB';
+ return `<div class="page-heading inner-heading"><div><h1>Java 管理</h1><p>下载或选择适合游戏版本的 Java。</p></div><button class="outline-btn" data-action="refresh-java" ${state.javaLoading ? 'disabled' : ''}>${icon('refresh-cw',16)} ${state.javaLoading ? '正在检测' : '检测本机 Java'}</button></div>
+ <div class="section-title"><div><span class="section-index">01 / DOWNLOAD</span><h3>下载 Java</h3></div><span class="section-note">Eclipse Temurin · JRE · 当前系统和架构</span></div>
+ <div class="java-download-grid">${options.map(major => { const installed = runtimes.some(j => j.managed && j.major === major); const desc = {8:'适用于多数旧版本',17:'适用于部分较新版本',21:'适用于较新版本',25:'适用于需要 Java 25 的版本'}[major]; return `<div class="java-download-card"><div class="java-card-top"><span>JAVA</span>${icon('download',16)}</div><strong>${major}</strong><p>${desc}</p><button data-java-install="${major}" ${hasJob(`java:${major}`) || installed || state.javaLoading ? 'disabled' : ''}>${installed ? '已安装' : hasJob(`java:${major}`) ? '任务中' : '下载安装'}</button></div>`; }).join('')}</div>
+ <div class="section-title"><div><span class="section-index">02 / INSTALLED</span><h3>可用的 Java <span class="count">${runtimes.length}</span></h3></div><span class="section-note">当前启动路径：${esc(state.javaPath)}</span></div>
+ <div class="version-list">${runtimes.length ? runtimes.map((j,i) => `<div class="version-row java-row"><div class="row-icon">${icon('monitor',19)}</div><div class="row-name"><strong>Java ${esc(j.major || '')} <span class="java-version">${esc(j.version)}</span></strong><span class="java-path" title="${esc(j.path)}">${esc(j.path)}</span></div><div class="row-state installed"><span></span>${j.managed ? 'CCL 管理' : '本机环境'}</div><button class="row-button ${state.javaPath === j.path ? 'selected' : ''}" data-java-select="${i}">${state.javaPath === j.path ? '当前使用' : '选择使用'}</button>${j.managed ? `<button class="row-button danger-button" data-java-remove="${i}" ${hasJob(`java:${j.major}`) ? 'disabled' : ''}>删除</button>` : ''}</div>`).join('') : `<div class="empty-state">${icon('monitor',27)}<strong>${state.javaLoading ? '正在检测 Java…' : '尚未检测到 Java 环境'}</strong><p>下载一个版本，或在启动设置中手动填写路径。</p></div>`}</div>
+ ${state.javaDelete !== null && runtimes[state.javaDelete] ? `<div class="confirm-overlay"><div class="confirm-box"><span class="section-index">REMOVE RUNTIME</span><h3>删除 Java ${esc(runtimes[state.javaDelete].major)}？</h3><p>将删除由 CCL 下载的此 Java 环境。游戏文件和本机其他 Java 不受影响。</p><div><button class="row-button" data-action="cancel-java-remove">取消</button><button class="row-button danger-button" data-action="confirm-java-remove">确认删除</button></div></div></div>` : ''}`;
+}
+async function refreshJava() {
+ state.javaLoading = true; if (state.page === 'java') render();
+ try { state.javaRuntimes = await invoke('list_java'); }
+ catch (e) { state.notice = `检测 Java 失败：${e}`; state.noticeKind = 'error'; }
+ state.javaLoading = false; if (state.page === 'java') render();
+}
+let renderedPage = null;
+function activeJobCount() { return state.jobs.filter(j => j.status === 'queued' || j.status === 'running').length; }
+function renderChrome() {
+ const root = app.querySelector('#toast-root'); if (!root) return;
+ root.innerHTML = state.notice ? `<div class="toast ${state.noticeKind}">${esc(state.notice)}${state.crash ? '<button class="toast-log" data-action="open-crash-log">查看日志</button>' : ''}<button data-action="dismiss" aria-label="关闭">${icon('x',15)}</button></div>` : '';
+ const badge = app.querySelector('.job-badge'); if (badge) { const n = activeJobCount(); badge.textContent = n ? String(n) : ''; badge.classList.toggle('has-jobs', !!n); }
+ const footer = app.querySelector('.side-footer'); if (footer) footer.innerHTML = `<span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.0</span>`;
+ const count = app.querySelector('.side-card strong'); if (count) count.innerHTML = `${String(state.versions.filter(v=>v.installed).length).padStart(2,'0')} <small>个版本</small>`;
+ hydrateIcons();
+}
+function renderOverlay() { const root = app.querySelector('#modal-root'); if (!root) return; root.innerHTML = state.launchView ? launchScreen() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : ''; hydrateIcons(); }
+function render() {
+ const first = !app.querySelector('.app-shell');
+ if (first) app.innerHTML = shell();
+ else {
+  const content = app.querySelector('.content');
+  const same = renderedPage === state.page;
+  const values = same ? [...content.querySelectorAll('form input, form select')].filter(x => x.name).map(x => ({name:x.name, value:x.value, checked:x.checked, type:x.type})) : [];
+  const active = same && content.contains(document.activeElement) ? document.activeElement : null;
+  const focus = active ? { name:active.name, id:active.id, start:active.selectionStart, end:active.selectionEnd } : null;
+  content.innerHTML = state.page === 'home' ? home() : state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : settingsPage();
+  for (const saved of values) { const el = [...content.querySelectorAll('form input, form select')].find(x => x.name === saved.name && x.type === saved.type); if (el) { el.value = saved.value; if (el.type === 'checkbox' || el.type === 'radio') el.checked = saved.checked; } }
+  if (focus) { const el = [...content.querySelectorAll('input, select')].find(x => focus.id ? x.id === focus.id : x.name === focus.name); if (el) { el.focus({preventScroll:true}); if (focus.start != null && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(focus.start, focus.end); } catch {} } } }
+  app.querySelectorAll('.nav [data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === state.page));
+  app.querySelector('.breadcrumbs strong').textContent = ({home:'启动游戏',versions:'版本管理',content:'模组与整合包',downloads:'下载任务',java:'Java 管理',account:'账户与外观',settings:'启动设置'})[state.page];
+  app.querySelector('.avatar').textContent = playerName().slice(0,1).toUpperCase(); app.querySelector('.profile strong').textContent = playerName(); app.querySelector('.profile small').textContent = state.accountMode==='microsoft' && state.account ? '微软账户' : '离线玩家';
+ }
+ renderedPage = state.page; renderChrome(); renderOverlay(); hydrateIcons(); refreshPreview();
+}
+async function refresh() {
+ state.loading = true; render();
+ try { state.versions = await invoke('list_versions', { gameDir: state.gameDir }); state.online = true; }
+ catch (e) { state.online = false; try { state.versions = await invoke('installed_versions', { gameDir: state.gameDir }); } catch {} state.notice = `无法获取官方版本列表：${e}`; state.noticeKind = 'error'; }
+ if (!state.versions.some(v => v.id === state.selected && v.installed)) state.selected = state.versions.find(v => v.installed)?.id || '';
+ state.loading = false; persist(); render();
+}
+app.addEventListener('pointerdown', event => { const edge=event.target.closest('[data-resize]'); if (edge && event.button===0 && isTauri()) getCurrentWindow().startResizeDragging(edge.dataset.resize).catch(e=>flash(`无法调整窗口大小：${e}`,'error')); });
+app.addEventListener('click', async event => {
+ const menuSummary=event.target.closest('.version-menu summary');
+ app.querySelectorAll('.version-menu[open]').forEach(menu=>{ if(!menuSummary || menuSummary.parentElement!==menu) menu.open=false; });
+ const windowControl=event.target.closest('[data-window]');
+ if (windowControl) { if (isTauri()) { try { const win=getCurrentWindow(); if (windowControl.dataset.window==='minimize') await win.minimize(); else if(windowControl.dataset.window==='maximize') await win.toggleMaximize(); else if(windowControl.dataset.window==='close') await win.close(); } catch(e) { flash(`窗口操作失败：${e}`,'error'); } } return; }
+ const page = event.target.closest('[data-page]'); if (page) { state.page = page.dataset.page; render(); if (state.page === 'java') await refreshJava(); if (state.page === 'content') { if(!state.contentTarget || !state.versions.some(v=>v.installed && v.id===state.contentTarget)) state.contentTarget=state.selected || ''; await refreshMods(); } return; }
+ const openFolder = event.target.closest('[data-open-version-folder]'); if (openFolder) { try { await invoke('open_version_folder',{gameDir:state.gameDir,version:openFolder.dataset.openVersionFolder}); } catch(e) { flash(String(e),'error'); } return; }
+ const exportButton=event.target.closest('[data-export-game]'); if(exportButton) { state.archiveDraft={kind:'export',version:exportButton.dataset.exportGame,gameDir:state.gameDir}; renderOverlay(); return; }
+ const select = event.target.closest('[data-select]'); if (select) { state.selected = select.dataset.select; persist(); render(); flash(`已选择 ${state.selected}`); return; }
+ const install = event.target.closest('[data-install]'); if (install) { state.installDraft={version:install.dataset.install,loader:'vanilla',addons:[]}; renderOverlay(); return; }
+ const contentInstall = event.target.closest('[data-content-install]');
+ if (contentInstall && !state.contentBusy) {
+  const item=state.contentResults[Number(contentInstall.dataset.contentInstall)]; if(!item) return;
+  const kind=state.contentKind,source=state.contentSource,apiKey=state.contentKey,gameDir=state.gameDir,target=state.contentTarget,javaPath=state.javaPath;
+  if(kind==='mod') {
+   if(!target || item.installed) return;
+   const draft={title:item.title,projectId:item.id,source,apiKey,gameDir,target,loading:true,versions:[],error:''}; state.modDraft=draft; renderOverlay();
+   try { const versions=await invoke('list_mod_versions',{gameDir,version:target,source,projectId:item.id,apiKey}); if(state.modDraft===draft) { draft.versions=versions; draft.loading=false; renderOverlay(); } }
+   catch(e) { if(state.modDraft===draft) { draft.error=String(e); draft.loading=false; renderOverlay(); } }
+  } else enqueueJob({key:`modpack:${source}:${item.id}:${gameDir}`,kind,title:item.title,gameDir,run:job=>invoke('install_modpack',{gameDir,source,projectId:item.id,apiKey,javaPath,jobId:job.id})});
+  return;
+ }
+ const modToggle = event.target.closest('[data-mod-toggle]');
+ if (modToggle && !state.contentBusy) { const m = state.localMods[Number(modToggle.dataset.modToggle)]; try { await invoke('set_mod_enabled',{gameDir:state.gameDir,version:state.contentTarget,name:m.name,enabled:!m.enabled}); await refreshMods(); } catch(e) { flash(`操作失败：${e}`,'error'); } return; }
+ const modRemove = event.target.closest('[data-mod-remove]'); if (modRemove) { state.modDelete = Number(modRemove.dataset.modRemove); render(); return; }
+ const javaSelect = event.target.closest('[data-java-select]');
+ if (javaSelect) { const java = state.javaRuntimes[Number(javaSelect.dataset.javaSelect)]; if (java) { state.javaPath = java.path; persist(); render(); flash(`已选择 Java ${java.version}`); } return; }
+ const javaRemove = event.target.closest('[data-java-remove]');
+ if (javaRemove) { state.javaDelete = Number(javaRemove.dataset.javaRemove); render(); return; }
+ const javaInstall = event.target.closest('[data-java-install]');
+ if (javaInstall && !state.javaLoading) {
+  const major=Number(javaInstall.dataset.javaInstall);
+  enqueueJob({key:`java:${major}`,kind:'java',title:`Java ${major} · Eclipse Temurin`,run:async job=>{
+   const java=await invoke('install_java',{major,jobId:job.id});
+   if (state.javaPath==='java' || !state.javaPath) { state.javaPath=java.path; persist(); }
+  }}); if(state.page==='java') render(); return;
+ }
+ const retry=event.target.closest('[data-retry-job]'); if (retry) { const old=state.jobs.find(j=>j.id===retry.dataset.retryJob); if (old) enqueueJob({key:old.key,kind:old.kind,title:old.title,gameDir:old.gameDir,version:old.version,run:old.run}); return; }
+ const action = event.target.closest('[data-action]')?.dataset.action;
+ if(action==='import-game') { try { const path=await openDialog({multiple:false,directory:false,filters:[{name:'CCL 游戏导出包',extensions:['zip']}]}); if(path && typeof path==='string') { const manifest=await invoke('inspect_game_archive',{path}); state.archiveDraft={kind:'import',path,manifest,gameDir:state.gameDir,javaPath:state.javaPath}; renderOverlay(); } } catch(e) { flash(`无法读取导入包：${e}`,'error'); } return; }
+ if(action==='close-archive' || (action==='close-archive-backdrop' && event.target.classList.contains('install-overlay'))) { state.archiveDraft=null; renderOverlay(); return; }
+ if(action==='confirm-export' && state.archiveDraft?.kind==='export') { const d=state.archiveDraft,includeSaves=!!app.querySelector('#archive-saves')?.checked; try { const path=await saveDialog({defaultPath:`CCL-${d.version}.zip`,filters:[{name:'CCL 游戏导出包',extensions:['zip']}]}); if(!path) return; const launchSettings={memory:Number(state.memory),optimize:state.optimize,jvmArgs:state.jvmArgs,gameArgs:state.gameArgs}; state.archiveDraft=null;renderOverlay(); enqueueJob({key:`export:${d.gameDir}:${d.version}:${path}`,kind:'export',title:`导出 · ${d.version}`,run:job=>invoke('export_game',{gameDir:d.gameDir,version:d.version,path,includeSaves,launchSettings,jobId:job.id})}); } catch(e) { flash(`导出失败：${e}`,'error'); } return; }
+ if(action==='confirm-import' && state.archiveDraft?.kind==='import') { const d=state.archiveDraft,restoreSettings=!!app.querySelector('#archive-settings')?.checked; state.archiveDraft=null;renderOverlay();enqueueJob({key:`import:${d.gameDir}:${d.path}`,kind:'import',title:`导入 · ${d.manifest.name}`,gameDir:d.gameDir,run:async job=>{const result=await invoke('import_game',{gameDir:d.gameDir,path:d.path,javaPath:d.javaPath,jobId:job.id}); if(d.gameDir===state.gameDir) { state.selected=result.version; if(restoreSettings && result.launchSettings) Object.assign(state,result.launchSettings); persist(); } }});return; }
+ if(action==='close-launch-view') { state.launchView=null; renderOverlay(); return; }
+ if(action==='begin-login') {
+  const attempt={}; state.loginAttempt=attempt;state.browserPrompt=null;render();
+  try { const prompt=await invoke('begin_microsoft_login'); if(state.loginAttempt!==attempt) return; state.browserPrompt=prompt;render(); const account=await invoke('complete_microsoft_login'); if(state.loginAttempt!==attempt) return; state.account=account;state.accountMode='microsoft';state.loginAttempt=null;state.browserPrompt=null;render(); await refreshAppearance(); }
+  catch(e) { if(state.loginAttempt===attempt) { state.loginAttempt=null;state.browserPrompt=null;render();flash(`登录失败：${e}`,'error'); } } return;
+ }
+ if(action==='cancel-login') { state.loginAttempt=null;state.browserPrompt=null;render(); try { await invoke('cancel_microsoft_login'); } catch(e) { flash(String(e),'error'); } return; }
+ if(action==='open-microsoft-login') { try { await invoke('open_microsoft_login'); } catch(e) { flash(String(e),'error'); } return; }
+ if(action==='use-offline') { state.accountMode='offline';render();return; }
+ if(action==='use-microsoft' && state.account) { state.accountMode='microsoft';render();return; }
+ if(action==='logout-microsoft') { state.accountBusy=true;render();try { await invoke('logout_microsoft');state.account=null;state.accountMode='offline';state.appearance=null;state.previewCapeId=''; } catch(e) { flash(String(e),'error'); } state.accountBusy=false;render();return; }
+ if(action==='choose-skin' || action==='choose-cape') { const kind=action==='choose-skin'?'skin':'cape';try { const path=await openDialog({multiple:false,directory:false,filters:[{name:'PNG 图片',extensions:['png']}]}); if(typeof path!=='string') return;const data=await invoke('preview_texture',{path,kind});const file={path,data,name:path.split(/[\\/]/).pop()};if(kind==='skin') state.localSkin=file;else state.localCape=file;render(); } catch(e) { flash(`无法预览图片：${e}`,'error'); } return; }
+ if(action==='clear-skin') { state.localSkin=null;render();return; }
+ if(action==='clear-cape') { state.localCape=null;render();return; }
+ if(action==='upload-skin' && state.localSkin && state.account) { state.accountBusy=true;render();try { await invoke('upload_account_skin',{path:state.localSkin.path,model:state.skinModel});state.localSkin=null;await refreshAppearance();flash('皮肤已应用到正版账户。'); } catch(e) { flash(`应用皮肤失败：${e}`,'error'); } state.accountBusy=false;render();return; }
+ if(action==='reset-skin' && state.account) { state.accountBusy=true;render();try { await invoke('reset_account_skin');state.localSkin=null;await refreshAppearance();flash('已恢复账户默认皮肤。'); } catch(e) { flash(`恢复皮肤失败：${e}`,'error'); } state.accountBusy=false;render();return; }
+ if(action==='hide-cape' && state.account) { state.accountBusy=true;render();try { await invoke('set_account_cape',{capeId:null});state.localCape=null;await refreshAppearance();flash('已隐藏账户披风。'); } catch(e) { flash(`更新披风失败：${e}`,'error'); } state.accountBusy=false;render();return; }
+ const previewCape=event.target.closest('[data-preview-cape]'); if(previewCape) { const cape=state.appearance?.capes[Number(previewCape.dataset.previewCape)];if(cape) {state.previewCapeId=cape.id;state.localCape=null;render();}return; }
+ const applyCape=event.target.closest('[data-apply-cape]'); if(applyCape && state.account) { const cape=state.appearance?.capes[Number(applyCape.dataset.applyCape)];if(!cape)return;state.accountBusy=true;render();try { await invoke('set_account_cape',{capeId:cape.id});state.localCape=null;await refreshAppearance();flash('已更新账户披风。'); } catch(e) { flash(`更新披风失败：${e}`,'error'); } state.accountBusy=false;render();return; }
+ if (action === 'dismiss') { state.notice = ''; state.crash=null; renderChrome(); }
+ if (action === 'open-log' || action === 'open-crash-log') { const version=action==='open-crash-log' ? state.crash?.version : state.selected; const gameDir=action==='open-crash-log' ? state.crash?.gameDir : state.gameDir; if(version) { try { await invoke('open_game_log',{gameDir,version,logName:action==='open-crash-log' ? state.crash.logName : null}); } catch(e) { flash(String(e),'error'); } } }
+ if(action==='close-mod-dialog' || (action==='close-mod-backdrop' && event.target.classList.contains('install-overlay'))) { state.modDraft=null; renderOverlay(); }
+ if(action==='confirm-mod-install' && state.modDraft) { const draft=state.modDraft; const modVersionId=app.querySelector('input[name=modVersion]:checked')?.value; if(!modVersionId) return; state.modDraft=null; renderOverlay(); enqueueJob({key:`mod:${draft.source}:${draft.projectId}:${draft.gameDir}:${draft.target}`,kind:'mod',title:`${draft.title} · ${draft.target}`,gameDir:draft.gameDir,version:draft.target,run:job=>invoke('install_mod',{gameDir:draft.gameDir,version:draft.target,source:draft.source,projectId:draft.projectId,apiKey:draft.apiKey,modVersionId,jobId:job.id})}); }
+ if (action === 'close-install' || (action === 'close-install-backdrop' && event.target.classList.contains('install-overlay'))) { state.installDraft = null; renderOverlay(); }
+ if (action === 'confirm-install' && state.installDraft) { const draft={...state.installDraft,addons:[...state.installDraft.addons]}; state.installDraft=null; renderOverlay(); queueVersion(draft); }
+ if (action === 'clear-jobs') { state.jobs=state.jobs.filter(j=>j.status!=='done'); if (state.page==='downloads') render(); else renderChrome(); }
+ if (action === 'refresh') await refresh();
+ if (action === 'refresh-java') await refreshJava();
+ if (action === 'cancel-mod-remove') { state.modDelete = null; render(); }
+ if (action === 'confirm-mod-remove') { const m = state.localMods[state.modDelete]; state.modDelete = null; if (m) { try { await invoke('remove_mod',{gameDir:state.gameDir,version:state.contentTarget,name:m.name}); await refreshMods(); if(state.contentResults.length) await searchContent(); flash('模组已删除。'); } catch(e) { flash(`删除失败：${e}`,'error'); } } }
+ if (action === 'cancel-java-remove') { state.javaDelete = null; render(); }
+ if (action === 'confirm-java-remove') { const java = state.javaRuntimes[state.javaDelete]; state.javaDelete = null; if (java?.managed) { try { await invoke('remove_java', { major: java.major }); if (state.javaPath === java.path) { state.javaPath = 'java'; persist(); } state.notice = `Java ${java.major} 已删除。`; state.noticeKind = ''; await refreshJava(); } catch (e) { flash(`删除失败：${e}`, 'error'); } } }
+ if (action === 'launch') { const view={version:state.selected,phase:'preparing',error:''}; state.launchView=view; state.crash=null; renderOverlay(); try { await invoke('launch_game', { options: { version: state.selected, username: state.username, javaPath: state.javaPath, gameDir: state.gameDir, memory: Number(state.memory), optimize:state.optimize, jvmArgs:state.jvmArgs, gameArgs:state.gameArgs, accountMode:state.accountMode } }); if(state.launchView===view && view.phase==='preparing') { view.phase='started'; renderOverlay(); } } catch (e) { if(state.launchView===view) { view.phase='failed'; view.error=String(e); renderOverlay(); } else flash(`启动失败：${e}`, 'error'); } }
+});
+app.addEventListener('change', event => {
+ if(event.target.id==='skin-model') { state.skinModel=event.target.value;render();return; }
+ if(event.target.id==='contentTarget') { state.contentTarget=event.target.value; state.contentResults=[]; state.localMods=[]; refreshMods(); return; }
+ if (event.target.name==='draftLoader' && state.installDraft) { state.installDraft.loader=event.target.value; state.installDraft.addons=state.installDraft.addons.filter(id=>ADDONS.find(a=>a.id===id)?.loaders.includes(state.installDraft.loader)); renderOverlay(); return; }
+ if (event.target.name==='draftAddon' && state.installDraft) { const selected=state.installDraft.addons; state.installDraft.addons=event.target.checked ? [...new Set([...selected,event.target.value])] : selected.filter(x=>x!==event.target.value); return; }
+ if (event.target.closest('#content-form') && ['source','kind'].includes(event.target.name)) { const form=event.target.closest('form'); const data=new FormData(form); state.contentSource=data.get('source'); state.contentKind=data.get('kind'); state.contentQuery=data.get('query') || ''; state.contentKey=data.get('apiKey') || state.contentKey; state.contentResults=[]; render(); }
+});
+app.addEventListener('input', event => { if(event.target.id==='version-filter') { state.versionQuery=event.target.value; render(); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if (event.target.id === 'memory') event.target.closest('.field').querySelector('label span').textContent = `${event.target.value} MB`; });
+app.addEventListener('submit', async event => { if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey); await searchContent(); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory')), optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); render(); flash('设置已保存。'); if (changed) await refresh(); });
+async function init() {
+ render();
+ if (!isTauri()) { state.notice = '请在 Tauri 桌面应用中使用启动器。'; state.noticeKind = 'error'; render(); return; }
+ try { await invoke('configure_proxy', { proxyUrl: state.proxyUrl }); if (!state.gameDir) state.gameDir = await invoke('default_game_dir'); await listen('java-progress', e => jobEvent(e.payload)); await listen('install-progress', e => jobEvent(e.payload)); await listen('game-exit', e => { if(!e.payload.success) { state.crash={version:e.payload.version,gameDir:e.payload.gameDir,logName:e.payload.logPath.split(/[\\/]/).pop()}; if(state.launchView?.version===e.payload.version) { state.launchView.phase='failed'; state.launchView.error=`游戏异常退出（代码 ${e.payload.code ?? '未知'}），可以打开启动日志查看详情。`; renderOverlay(); } else flash(`游戏 ${e.payload.version} 异常退出（代码 ${e.payload.code ?? '未知'}）。`,'error'); } else if(state.launchView?.version===e.payload.version) { state.launchView=null; renderOverlay(); } }); await refresh(); } catch (e) { flash(String(e), 'error'); }
+}
+init();
