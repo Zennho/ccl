@@ -1,3 +1,4 @@
+mod pcl;
 use crate::{install_version, loaders, report, resource_lock, root, version_id, ResultT};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -43,7 +44,9 @@ pub struct ImportResult {
     launch_settings: Option<LaunchSettings>,
 }
 fn validate_manifest(manifest: &ArchiveManifest) -> ResultT<()> {
-    if manifest.format != "ccl-instance" || manifest.format_version != 1 {
+    if !["ccl-instance", "modrinth"].contains(&manifest.format.as_str())
+        || manifest.format_version != 1
+    {
         return Err("不是受支持的 CCL 游戏导出包".into());
     }
     version_id(&manifest.game_version)?;
@@ -240,17 +243,37 @@ fn unique() -> String {
         SERIAL.fetch_add(1, Ordering::Relaxed)
     )
 }
-fn read_archive(path: &str, job: Option<&str>) -> ResultT<(ZipArchive<File>, ArchiveManifest)> {
+struct ParsedArchive {
+    manifest: ArchiveManifest,
+    pcl: Option<pcl::Pack>,
+}
+fn read_archive(path: &str, job: Option<&str>) -> ResultT<(ZipArchive<File>, ParsedArchive)> {
     crate::jobs::check(job)?;
     let file = File::open(path).map_err(|e| format!("无法打开导入文件：{e}"))?;
     let mut zip = ZipArchive::new(file).map_err(|e| format!("导入文件不是有效的 ZIP：{e}"))?;
-    let manifest = manifest_from_zip(&mut zip)?;
-    validate_zip(&mut zip, manifest.include_saves, job)?;
-    Ok((zip, manifest))
+    let is_ccl = zip.file_names().any(|name| name == "ccl-instance.json");
+    let parsed = if is_ccl {
+        let manifest = manifest_from_zip(&mut zip)?;
+        if manifest.format != "ccl-instance" {
+            return Err("CCL 导出包格式无效".into());
+        }
+        validate_zip(&mut zip, manifest.include_saves, job)?;
+        ParsedArchive {
+            manifest,
+            pcl: None,
+        }
+    } else {
+        let pack = pcl::inspect(&mut zip, job)?;
+        ParsedArchive {
+            manifest: pack.manifest.clone(),
+            pcl: Some(pack),
+        }
+    };
+    Ok((zip, parsed))
 }
 #[tauri::command]
 pub async fn inspect_game_archive(path: String) -> ResultT<ArchiveManifest> {
-    tauri::async_runtime::spawn_blocking(move || read_archive(&path, None).map(|(_, m)| m))
+    tauri::async_runtime::spawn_blocking(move || read_archive(&path, None).map(|(_, m)| m.manifest))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -259,8 +282,14 @@ fn export_archive(
     source: &Path,
     dest: &Path,
     manifest: &ArchiveManifest,
+    export_format: &str,
     job: Option<&str>,
 ) -> ResultT<()> {
+    let index = if export_format == "pcl" {
+        Some(pcl::encode_manifest(manifest)?)
+    } else {
+        None
+    };
     let mut files = Vec::new();
     if source.exists() {
         collect_files(
@@ -311,14 +340,21 @@ fn export_archive(
         let options = SimpleFileOptions::default()
             .compression_method(CompressionMethod::Deflated)
             .large_file(true);
-        zip.start_file("ccl-instance.json", options)
+        let (index_name, index_bytes, file_prefix) = match &index {
+            Some(bytes) => ("modrinth.index.json", bytes.clone(), "overrides"),
+            None => (
+                "ccl-instance.json",
+                serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?,
+                "instance",
+            ),
+        };
+        zip.start_file(index_name, options)
             .map_err(|e| e.to_string())?;
-        zip.write_all(&serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?)
-            .map_err(|e| e.to_string())?;
+        zip.write_all(&index_bytes).map_err(|e| e.to_string())?;
         for (i, (path, name)) in files.iter().enumerate() {
             crate::jobs::check(job)?;
             report(app, job, &format!("正在打包 {name}"), i, files.len());
-            zip.start_file(format!("instance/{name}"), options)
+            zip.start_file(format!("{file_prefix}/{name}"), options)
                 .map_err(|e| e.to_string())?;
             crate::jobs::copy_checked(
                 &mut File::open(path).map_err(|e| e.to_string())?,
@@ -361,8 +397,13 @@ pub async fn export_game(
     path: String,
     include_saves: bool,
     launch_settings: Option<LaunchSettings>,
+    export_format: Option<String>,
     job_id: Option<String>,
 ) -> ResultT<()> {
+    let export_format = export_format.unwrap_or_else(|| "ccl".into());
+    if !["ccl", "pcl"].contains(&export_format.as_str()) {
+        return Err("未知导出格式".into());
+    }
     let dir = root(&game_dir)?;
     let meta = loaders::version_json(&dir, &version)?;
     let loader = meta["cclLoader"].as_str().unwrap_or("vanilla").to_string();
@@ -386,7 +427,14 @@ pub async fn export_game(
     })
     .await?;
     tauri::async_runtime::spawn_blocking(move || {
-        export_archive(&app, &source, &dest, &manifest, job_id.as_deref())
+        export_archive(
+            &app,
+            &source,
+            &dest,
+            &manifest,
+            &export_format,
+            job_id.as_deref(),
+        )
     })
     .await
     .map_err(|e| e.to_string())?
@@ -396,8 +444,14 @@ fn extract_archive(
     path: &str,
     staging: &Path,
     job: Option<&str>,
-) -> ResultT<ArchiveManifest> {
-    let (mut zip, manifest) = read_archive(path, job)?;
+) -> ResultT<ParsedArchive> {
+    let (mut zip, parsed) = read_archive(path, job)?;
+    if let Some(pack) = &parsed.pcl {
+        pcl::extract(&mut zip, pack, staging, job, |name, i, count| {
+            report(app, job, &format!("正在导入 {name}"), i, count)
+        })?;
+        return Ok(parsed);
+    }
     fs::create_dir_all(staging).map_err(|e| e.to_string())?;
     let count = zip.len();
     for i in 0..count {
@@ -421,7 +475,7 @@ fn extract_archive(
             .map_err(|e| format!("解压文件失败：{e}"))?;
         report(app, job, &format!("正在导入 {name}"), i, count);
     }
-    Ok(manifest)
+    Ok(parsed)
 }
 #[tauri::command]
 pub async fn import_game(
@@ -451,7 +505,7 @@ pub async fn import_game(
         crate::jobs::check(job_id.as_deref())?;
         Ok(m)
     });
-    let manifest = match extracted {
+    let parsed = match extracted {
         Ok(m) => m,
         Err(e) => {
             let _ = fs::remove_dir_all(&staging);
@@ -459,6 +513,17 @@ pub async fn import_game(
         }
     };
     let outcome: ResultT<ImportResult> = async {
+        if let Some(pack) = &parsed.pcl {
+            pcl::download(
+                &app,
+                &pack.files,
+                &staging,
+                pack.unpacked_size,
+                job_id.as_deref(),
+            )
+            .await?;
+        }
+        let manifest = parsed.manifest;
         report(&app, job_id.as_deref(), "正在准备游戏本体", 0, 0);
         install_version(
             app.clone(),

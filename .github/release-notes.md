@@ -2,10 +2,9 @@ CCL 是支持 Windows、Linux 和 macOS 的 Minecraft Java 版启动器。
 
 本次更新：
 
-- 模组和整合包详情页显示项目描述；完整描述暂时不可用时会保留搜索结果中的简介。
-- 模组列表移除单独的项目网址按钮，相关链接集中在详情页；排序方式与其他筛选控件统一布局和样式。
-- 自定义背景图片现在会显示在左侧菜单栏后方；更换横幅图片时隐藏默认插画和文字。
-- 界面卡片、列表、按钮与输入框使用更柔和的圆角和磨砂效果。
+- 导入 PCL 导出的 Modrinth `.mrpack` 整合包，支持包内文件、下载清单、配置与可选存档；导入时会校验下载文件。
+- 导出时可选择 CCL 游戏包或 PCL 兼容的 `.mrpack`；PCL 格式包含模组和配置，不包含 CCL 启动参数。
+- PCL 兼容导出支持原版、Fabric、Forge 和 NeoForge；PCL 不支持 Quilt。导入 `.mrpack` 时会安装可选客户端文件。
 
 Windows x64 下载 `.exe` 安装程序；Linux x64 下载 `.deb` 或 `.AppImage`；macOS Apple Silicon 选择 `aarch64`，Intel 选择 `x64` 的 `.dmg`。
 
