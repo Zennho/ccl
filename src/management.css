@@ -1,0 +1,9 @@
+/* Compact controls retain the launcher's soft, frosted appearance. */
+.mod-toolbar,.job-settings{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 16px;border:1px solid rgba(181,197,171,.65);border-radius:16px;background:rgba(250,251,244,.72);backdrop-filter:blur(12px)}
+.mod-toolbar input,.mod-toolbar select,.job-settings select{min-height:38px;padding:8px 12px;color:#4d6047;background:rgba(255,255,250,.87);border:1px solid #d8e3d1;border-radius:11px;outline:none;font:inherit;font-size:12px}
+.mod-toolbar input{flex:1;min-width:180px}.mod-toolbar input:focus,.mod-toolbar select:focus,.job-settings select:focus{border-color:#88a67a;box-shadow:0 0 0 3px #a5c39a40}
+.mod-bulk{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:11px 3px;color:#71826b;font-size:11px}.mod-bulk label{display:flex;align-items:center;gap:5px;cursor:pointer}.mod-bulk input,.mod-check{accent-color:#759968}.mod-bulk>div{display:flex;gap:6px;margin-left:auto}.mod-bulk .row-button{padding:7px 10px}.mod-check{flex:none;margin:0 4px 0 0}
+.job-settings{margin:16px 0 22px;color:#61765a;font-size:12px}.job-settings label{font-weight:700}.job-settings span{color:#8a9a84;font-size:11px}.job-metrics{color:#7f9675;text-align:right;font-size:10px;min-height:0}.job-metrics:not(:empty){margin-top:8px}
+@media(max-width:720px){.mod-bulk>div{margin-left:0}.mod-toolbar input{min-width:120px}}
+
+.mod-update-summary{margin:9px 3px 2px;color:#84947d;font-size:11px;line-height:1.5}

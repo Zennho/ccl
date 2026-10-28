@@ -850,6 +850,110 @@ pub fn list_mods(game_dir: String, version: String) -> ResultT<Vec<LocalMod>> {
     mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(mods)
 }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModUpdate {
+    name: String,
+    project_id: String,
+    current: String,
+    latest: String,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModUpdateCheck {
+    updates: Vec<ModUpdate>,
+    checked: usize,
+    unknown: usize,
+    failed: usize,
+}
+fn modrinth_update(name: &str, versions: &[Value]) -> Option<(String, String)> {
+    let filename = name.strip_suffix(".disabled").unwrap_or(name);
+    let installed = versions.iter().find(|v| {
+        v["files"].as_array().is_some_and(|files| {
+            files
+                .iter()
+                .any(|f| f["filename"].as_str() == Some(filename))
+        })
+    })?;
+    let installed_date = installed["date_published"].as_str()?;
+    let latest = versions
+        .iter()
+        .filter(|v| v["date_published"].as_str().is_some())
+        .max_by_key(|v| v["date_published"].as_str().unwrap_or(""))?;
+    if latest["date_published"].as_str()? <= installed_date {
+        return None;
+    }
+    Some((
+        installed["version_number"]
+            .as_str()
+            .unwrap_or(filename)
+            .to_string(),
+        latest["version_number"]
+            .as_str()
+            .unwrap_or("新版本")
+            .to_string(),
+    ))
+}
+/// Updates are informational: installation still performs the normal dependency checks.
+#[tauri::command]
+pub async fn check_mod_updates(game_dir: String, version: String) -> ResultT<ModUpdateCheck> {
+    let (dir, game, loader) = current_instance(&game_dir, &version)?;
+    if loader == "vanilla" {
+        return Err("请选择已安装加载器的游戏版本".into());
+    }
+    let client = http_client()?;
+    let installed = installed_projects(&client, &dir, "modrinth").await?;
+    let total = list_mods(game_dir, version)?.len();
+    let count = installed.len();
+    let results = stream::iter(installed.into_iter().map(|(id, name)| {
+        let client = client.clone();
+        let game = game.clone();
+        let loader = loader.clone();
+        async move {
+            match mod_versions_raw(&client, "modrinth", &id, &game, &loader, "").await {
+                Ok(versions) => {
+                    let filename = name.strip_suffix(".disabled").unwrap_or(&name);
+                    let known = versions.iter().any(|v| {
+                        v["files"].as_array().is_some_and(|files| {
+                            files
+                                .iter()
+                                .any(|f| f["filename"].as_str() == Some(filename))
+                        }) && v["date_published"].as_str().is_some()
+                    });
+                    (
+                        known,
+                        false,
+                        modrinth_update(&name, &versions).map(|(current, latest)| ModUpdate {
+                            name,
+                            project_id: id,
+                            current,
+                            latest,
+                        }),
+                    )
+                }
+                Err(_) => (false, true, None),
+            }
+        }
+    }))
+    .buffer_unordered(4)
+    .collect::<Vec<_>>()
+    .await;
+    let checked = results.iter().filter(|(known, _, _)| *known).count();
+    let failed = results.iter().filter(|(_, failed, _)| *failed).count();
+    let unknown = total.saturating_sub(count) + results.len().saturating_sub(checked + failed);
+    let mut updates: Vec<_> = results
+        .into_iter()
+        .filter_map(|(_, _, update)| update)
+        .collect();
+    updates.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(ModUpdateCheck {
+        updates,
+        checked,
+        unknown,
+        failed,
+    })
+}
+
 #[tauri::command]
 pub async fn set_mod_enabled(
     game_dir: String,
@@ -1660,6 +1764,19 @@ mod tests {
     use super::*;
     use std::io::{Cursor, Write};
 
+    #[test]
+    fn only_reports_a_newer_compatible_version_when_installed_file_is_known() {
+        let versions = vec![
+            json!({"version_number":"2","date_published":"2025-02-01T00:00:00Z","files":[{"filename":"mod-2.jar"}]}),
+            json!({"version_number":"1","date_published":"2025-01-01T00:00:00Z","files":[{"filename":"mod-1.jar"}]}),
+        ];
+        assert_eq!(
+            modrinth_update("mod-1.jar.disabled", &versions),
+            Some(("1".into(), "2".into()))
+        );
+        assert_eq!(modrinth_update("mod-2.jar", &versions), None);
+        assert_eq!(modrinth_update("renamed.jar", &versions), None);
+    }
     #[test]
     fn reads_thumbnail_urls_from_both_providers() {
         assert_eq!(

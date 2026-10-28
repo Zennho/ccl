@@ -1189,6 +1189,7 @@ fn main() {
             content::curseforge_description,
             content::list_mod_versions,
             content::list_mods,
+            content::check_mod_updates,
             content::set_mod_enabled,
             content::remove_mod,
             content::install_mod,
