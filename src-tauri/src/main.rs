@@ -3,11 +3,14 @@ mod archive;
 mod auth;
 mod content;
 mod java;
+mod jobs;
 mod lan;
 mod lan_core;
 mod loaders;
 mod server_catalog;
+mod source_probe;
 mod thumbnails;
+mod version_manager;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -35,6 +38,7 @@ struct Version {
     kind: String,
     released: String,
     installed: bool,
+    isolated: bool,
 }
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -177,7 +181,7 @@ fn http_client() -> ResultT<reqwest::Client> {
 fn http_client_builder() -> ResultT<reqwest::ClientBuilder> {
     let proxy = MANUAL_PROXY.read().map_err(|_| "无法读取代理设置")?.clone();
     let mut builder = reqwest::Client::builder()
-        .user_agent("CCL/0.1.2")
+        .user_agent("CCL/0.1.3")
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(60));
     if let Some(proxy) = proxy {
@@ -268,6 +272,34 @@ async fn fetch_bytes(
     Err(errors.join("；"))
 }
 async fn get_manifest(client: &reqwest::Client) -> ResultT<(Value, bool)> {
+    let candidates = [
+        (MANIFEST.to_string(), false),
+        (mirror_url(MANIFEST).ok_or("版本镜像地址无效")?, true),
+    ];
+    let mut requests = stream::iter(candidates.into_iter().map(|(url, mirrored)| async move {
+        let bytes = client
+            .get(&url)
+            .timeout(Duration::from_secs(12))
+            .send()
+            .await
+            .map_err(network_error)?
+            .error_for_status()
+            .map_err(network_error)?
+            .bytes()
+            .await
+            .map_err(network_error)?;
+        let value: Value = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
+        if !value["versions"].is_array() {
+            return Err("版本清单格式错误".to_string());
+        }
+        Ok::<_, String>((value, mirrored))
+    }))
+    .buffer_unordered(2);
+    while let Some(result) = requests.next().await {
+        if let Ok(manifest) = result {
+            return Ok(manifest);
+        }
+    }
     let (bytes, mirrored) = fetch_bytes(client, MANIFEST, false, Duration::from_secs(12), None)
         .await
         .map_err(|e| format!("无法连接版本服务（{e}）"))?;
@@ -341,11 +373,12 @@ async fn download(
         std::process::id(),
         TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)
     ));
-    if let Err(e) = tokio::fs::write(&temporary, bytes).await {
+    let _cleanup = jobs::CleanupPath::file(temporary.clone());
+    if let Err(e) = fs::write(&temporary, bytes) {
         let _ = tokio::fs::remove_file(&temporary).await;
         return Err(e.to_string());
     }
-    if let Err(e) = tokio::fs::rename(&temporary, dest).await {
+    if let Err(e) = fs::rename(&temporary, dest) {
         let _ = tokio::fs::remove_file(&temporary).await;
         return Err(e.to_string());
     }
@@ -379,11 +412,12 @@ fn native_download<'a>(lib: &'a Value) -> Option<&'a Value> {
     );
     lib["downloads"]["classifiers"].get(&classifier)
 }
-fn extract_native(archive: &Path, dest: &Path) -> ResultT<()> {
+fn extract_native(archive: &Path, dest: &Path, job: Option<&str>) -> ResultT<()> {
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     fs::create_dir_all(dest).map_err(|e| e.to_string())?;
     for i in 0..zip.len() {
+        jobs::check(job)?;
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let Some(name) = entry.enclosed_name() else {
             continue;
@@ -396,7 +430,7 @@ fn extract_native(archive: &Path, dest: &Path) -> ResultT<()> {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let mut out = fs::File::create(target).map_err(|e| e.to_string())?;
-        std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+        jobs::copy_checked(&mut entry, &mut out, job)?;
     }
     Ok(())
 }
@@ -439,6 +473,7 @@ async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     .join(id)
                     .join(format!("{id}.json"))
                     .exists(),
+                isolated: false,
             })
         })
         .collect();
@@ -489,6 +524,7 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     kind: kind.into(),
                     released: String::new(),
                     installed: true,
+                    isolated: meta["cclInstance"].as_bool() == Some(true),
                 });
             }
         }
@@ -498,6 +534,19 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
 }
 #[tauri::command]
 async fn install_version(
+    app: tauri::AppHandle,
+    version: String,
+    game_dir: String,
+    job_id: Option<String>,
+) -> ResultT<()> {
+    let id = job_id.clone();
+    jobs::race(
+        id.as_deref(),
+        install_version_impl(app, version, game_dir, job_id),
+    )
+    .await
+}
+async fn install_version_impl(
     app: tauri::AppHandle,
     version: String,
     game_dir: String,
@@ -537,6 +586,25 @@ async fn install_version(
     prefer_mirror = meta_mirrored;
     let meta: Value =
         serde_json::from_slice(&meta_bytes).map_err(|e| format!("版本信息解析失败: {e}"))?;
+    if let Some(client_url) = meta["downloads"]["client"]["url"].as_str() {
+        if let Some(mirror) = mirror_url(client_url) {
+            report(&app, job_id.as_deref(), "正在选择较快的下载线路", 0, 0);
+            if let Some(fastest) = source_probe::fastest(&client, client_url, &mirror).await {
+                prefer_mirror = fastest;
+                report(
+                    &app,
+                    job_id.as_deref(),
+                    if fastest {
+                        "已选择镜像线路"
+                    } else {
+                        "已选择官方线路"
+                    },
+                    0,
+                    0,
+                );
+            }
+        }
+    }
     let version_dir = dir.join("versions").join(&version);
     let mut files: Vec<(String, PathBuf, Option<String>, bool)> = Vec::new();
     let mut add = |item: &Value, path: PathBuf, native: bool| {
@@ -644,8 +712,9 @@ async fn install_version(
     drop(downloads);
     report(&app, job_id.as_deref(), "正在解压运行库", total, total);
     for path in natives {
-        extract_native(&path, &version_dir.join("natives"))?;
+        extract_native(&path, &version_dir.join("natives"), job_id.as_deref())?;
     }
+    jobs::check(job_id.as_deref())?;
     fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
     fs::write(
         version_dir.join(format!("{version}.json")),
@@ -814,6 +883,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     let extra_jvm = parse_extra_args(&options.jvm_args)?;
     let extra_game = parse_extra_args(&options.game_args)?;
     let dir = root(&options.game_dir)?;
+    let running_version = version_manager::track_launch(&dir, &options.version)?;
     let version_dir = dir.join("versions").join(&options.version);
     let meta: Value = serde_json::from_slice(
         &fs::read(version_dir.join(format!("{}.json", options.version)))
@@ -887,13 +957,13 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
                 "legacy".into()
             },
         ),
-        ("version_type", "CCL 0.1.2".into()),
+        ("version_type", "CCL 0.1.3".into()),
         (
             "natives_directory",
             base_dir.join("natives").to_string_lossy().to_string(),
         ),
         ("launcher_name", "CCL".into()),
-        ("launcher_version", "0.1.2".into()),
+        ("launcher_version", "0.1.3".into()),
         ("classpath", cp.join(sep)),
         ("classpath_separator", sep.into()),
         (
@@ -963,7 +1033,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     use std::io::Write;
     writeln!(
         log,
-        "CCL 0.1.2 | 游戏版本 {} | 启动时间 {}",
+        "CCL 0.1.3 | 游戏版本 {} | 启动时间 {}",
         options.version, stamp
     )
     .map_err(|e| e.to_string())?;
@@ -982,6 +1052,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     let version = options.version;
     let game_dir = options.game_dir;
     std::thread::spawn(move || {
+        let _running_version = running_version;
         let status = child.wait();
         let (success, code) = match status {
             Ok(s) => (s.success(), s.code()),
@@ -1024,6 +1095,10 @@ fn main() {
             lan::test_ipv6_connection,
             server_catalog::public_servers,
             thumbnails::fetch_thumbnail,
+            jobs::begin_job,
+            jobs::cancel_job,
+            jobs::end_job,
+            version_manager::delete_version,
             default_game_dir,
             configure_proxy,
             list_versions,
@@ -1067,6 +1142,57 @@ mod download_tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[tokio::test]
+    async fn cancelling_a_download_releases_shared_file_for_another_job() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (started, ready) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (mut first, _) = listener.accept().await.unwrap();
+            let mut buffer = [0u8; 512];
+            first.read(&mut buffer).await.unwrap();
+            let _ = started.send(());
+            let (mut second, _) = listener.accept().await.unwrap();
+            second.read(&mut buffer).await.unwrap();
+            second
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\ntest")
+                .await
+                .unwrap();
+        });
+        let path = std::env::temp_dir().join(format!("ccl-cancel-download-{}", std::process::id()));
+        let _ = fs::remove_file(&path);
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let url = format!("http://{address}/file");
+        jobs::begin_job("download-cancel-a".into(), None).unwrap();
+        let worker = {
+            let client = client.clone();
+            let path = path.clone();
+            let url = url.clone();
+            tokio::spawn(async move {
+                jobs::race(
+                    Some("download-cancel-a"),
+                    download(&client, &url, &path, None, false),
+                )
+                .await
+            })
+        };
+        ready.await.unwrap();
+        jobs::cancel_job("download-cancel-a".into()).unwrap();
+        assert_eq!(worker.await.unwrap().unwrap_err(), jobs::CANCELLED);
+        assert!(!path.exists());
+        tokio::time::timeout(
+            Duration::from_secs(3),
+            download(&client, &url, &path, None, false),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"test");
+        jobs::end_job("download-cancel-a".into());
+        server.await.unwrap();
+        fs::remove_file(path).unwrap();
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn downloads_in_parallel_and_deduplicates_targets() {

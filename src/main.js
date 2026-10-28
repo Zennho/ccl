@@ -9,7 +9,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 
 const icons = { Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks };
 const saved = JSON.parse(localStorage.getItem('ccl-settings') || '{}');
-const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, versionQuery: '', accountMode: 'offline', account: null, browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentResults: [], contentBusy: false, localMods: [], modDelete: null, jobs: [], installDraft: null };
+const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, versionQuery: '', accountMode: 'offline', account: null, browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, versionDelete: null, versionDeleting: false, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentResults: [], contentBusy: false, localMods: [], modDelete: null, jobs: [], installDraft: null };
 const app = document.querySelector('#app');
 function hydrateIcons() { createIcons({ icons }); app.querySelectorAll('svg[data-lucide]').forEach(el => el.removeAttribute('data-lucide')); }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -49,7 +49,7 @@ function flash(message, kind = '') { state.notice = message; state.noticeKind = 
 function shell() {
   return `<div class="app-shell"><header class="window-bar"><div class="window-drag" data-tauri-drag-region><span class="window-kicker" data-tauri-drag-region>CCL</span><span class="window-separator" data-tauri-drag-region></span><span class="window-title" data-tauri-drag-region>MINECRAFT LAUNCHER</span></div><div class="window-controls"><button data-window="minimize" aria-label="最小化" title="最小化">${icon('minus',15)}</button><button data-window="maximize" aria-label="最大化或还原" title="最大化或还原">${icon('square',12)}</button><button data-window="close" class="window-close" aria-label="关闭" title="关闭">${icon('x',16)}</button></div></header><aside class="sidebar"><div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div><strong>CCL<span>.</span></strong><small>MINECRAFT 启动器</small></div></div>
   <nav class="nav"><button data-page="home" class="${state.page === 'home' ? 'active' : ''}">${icon('layout-grid')}<span>启动游戏</span></button><button data-page="versions" class="${state.page === 'versions' ? 'active' : ''}">${icon('layers-3')}<span>版本管理</span></button><button data-page="content" class="${state.page === 'content' ? 'active' : ''}">${icon('blocks')}<span>模组与整合包</span></button><button data-page="multiplayer" class="${state.page === 'multiplayer' ? 'active' : ''}">${icon('globe-2')}<span>多人联机</span></button><button data-page="downloads" class="${state.page === 'downloads' ? 'active' : ''}">${icon('download')}<span>下载任务</span><b class="job-badge">${activeJobCount() || ''}</b></button><button data-page="java" class="${state.page === 'java' ? 'active' : ''}">${icon('monitor')}<span>Java 管理</span></button><button data-page="account" class="${state.page === 'account' ? 'active' : ''}">${icon('user-round')}<span>账户与外观</span></button><button data-page="settings" class="${state.page === 'settings' ? 'active' : ''}">${icon('settings-2')}<span>启动设置</span></button></nav>
-  <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.2</span></div></div></aside>
+  <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.3</span></div></div></aside>
   <main class="main"><header class="topbar"><div class="breadcrumbs"><strong>${{home:'启动游戏',versions:'版本管理',content:'模组与整合包',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'}[state.page]}</strong></div><div class="top-right"><div class="avatar">${esc(playerName().slice(0,1).toUpperCase())}</div><div class="profile"><strong>${esc(playerName())}</strong><small>${state.accountMode==='microsoft' && state.account ? '微软账户' : '离线玩家'}</small></div></div></header>
   <div class="content">${state.page === 'home' ? home() : state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage()}</div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
 }
@@ -107,7 +107,7 @@ function versionsPage() {
  const list=state.versions.filter(v=>!query || `${v.name || ''} ${v.id} ${v.kind}`.toLowerCase().includes(query));
  return `<div class="page-heading inner-heading"><div><h1>版本管理</h1><p>选择游戏版本，安装加载器或管理游戏文件。</p></div><div class="heading-actions"><button class="outline-btn" data-action="import-game">${icon('folder-open',16)} 导入游戏</button><button class="outline-btn" data-action="refresh" ${state.loading ? 'disabled' : ''}>${icon('refresh-cw',16)} ${state.loading ? '正在获取' : '刷新'}</button></div></div>
  <div class="version-toolbar"><div><strong>游戏版本</strong><span class="count">${list.length}</span></div><label class="version-search"><span class="sr-only">搜索版本</span><input id="version-filter" type="search" placeholder="搜索版本" value="${esc(state.versionQuery)}"></label></div>
- <div class="version-list versions-list">${list.length ? list.map(v => `<div class="version-row"><div class="row-icon">${icon('box',18)}</div><div class="row-name"><strong>${esc(v.name || v.id)}</strong><span>${esc(v.kind)} ${v.released ? '· '+esc(v.released) : ''}</span></div><div class="row-state ${v.installed ? 'installed' : ''}"><span></span>${v.installed ? '已安装' : '可安装'}</div>${v.installed ? `<button class="row-button ${state.selected === v.id ? 'selected' : ''}" data-select="${esc(v.id)}">${state.selected === v.id ? '当前版本' : '选择版本'}</button><details class="version-menu"><summary aria-label="${esc(v.name || v.id)} 的更多操作" title="更多操作">${icon('more-horizontal',18)}</summary><div class="version-menu-items"><button data-open-version-folder="${esc(v.id)}">${icon('folder-open',15)} 游戏目录</button><button data-export-game="${esc(v.id)}">${icon('download',15)} 导出游戏</button>${v.kind === '正式版' ? `<button data-install="${esc(v.id)}">${icon('layers-3',15)} 配置安装</button>` : ''}</div></details>` : v.kind === '正式版' ? `<button class="row-button install-choice" data-install="${esc(v.id)}">${icon('download',14)} 安装</button>` : ''}</div>`).join('') : `<div class="empty-state">${icon('box',27)}<strong>${state.loading ? '正在获取版本列表…' : query ? '没有找到匹配的版本' : '还没有可显示的版本'}</strong><p>${query ? '试试其他关键词。' : '检查网络连接后刷新列表。'}</p></div>`}</div>`;
+ <div class="version-list versions-list">${list.length ? list.map(v => `<div class="version-row"><div class="row-icon">${icon('box',18)}</div><div class="row-name"><strong>${esc(v.name || v.id)}</strong><span>${esc(v.kind)} ${v.released ? '· '+esc(v.released) : ''}</span></div><div class="row-state ${v.installed ? 'installed' : ''}"><span></span>${v.installed ? '已安装' : '可安装'}</div>${v.installed ? `<button class="row-button ${state.selected === v.id ? 'selected' : ''}" data-select="${esc(v.id)}">${state.selected === v.id ? '当前版本' : '选择版本'}</button><details class="version-menu"><summary aria-label="${esc(v.name || v.id)} 的更多操作" title="更多操作">${icon('more-horizontal',18)}</summary><div class="version-menu-items"><button data-open-version-folder="${esc(v.id)}">${icon('folder-open',15)} 游戏目录</button><button data-export-game="${esc(v.id)}">${icon('download',15)} 导出游戏</button><button data-delete-version="${esc(v.id)}">${icon('x',15)} 删除版本</button>${v.kind === '正式版' ? `<button data-install="${esc(v.id)}">${icon('layers-3',15)} 配置安装</button>` : ''}</div></details>` : v.kind === '正式版' ? `<button class="row-button install-choice" data-install="${esc(v.id)}">${icon('download',14)} 安装</button>` : ''}</div>`).join('') : `<div class="empty-state">${icon('box',27)}<strong>${state.loading ? '正在获取版本列表…' : query ? '没有找到匹配的版本' : '还没有可显示的版本'}</strong><p>${query ? '试试其他关键词。' : '检查网络连接后刷新列表。'}</p></div>`}</div>${state.versionDelete ? `<div class="confirm-overlay"><section class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="delete-version-title"><span class="section-index">REMOVE VERSION</span><h3 id="delete-version-title">删除 ${esc(state.versionDelete.name)}？</h3><p>将删除该版本文件。共用资源、Java、存档和模组会保留；被其他版本依赖的游戏本体无法删除。</p>${state.versionDelete.isolated?'<p>保留的实例数据会留在 instances 目录；重新安装相同整合包前，需要先备份或移除旧目录。</p><label class="archive-check"><input type="checkbox" id="delete-instance-data"><span><strong>同时删除此实例的游戏数据</strong><small>包括该实例的存档、模组和配置，无法恢复。</small></span></label>':''}<div><button class="row-button" data-action="cancel-version-delete" ${state.versionDeleting?'disabled':''}>取消</button><button class="row-button danger-button" data-action="confirm-version-delete" ${state.versionDeleting?'disabled':''}>${state.versionDeleting?'正在删除…':'删除版本'}</button></div></section></div>`:''}`;
 }
 const ADDONS = [
  { id:'fabric-api', title:'Fabric API', desc:'许多 Fabric 模组的基础依赖', loaders:['fabric'] },
@@ -197,16 +197,16 @@ async function refreshAppearance() {
  if(state.page==='account') render();
 }
 function downloadsPage() {
- const running = state.jobs.filter(j=>j.status==='running').length;
- return `<div class="page-heading inner-heading"><div><h1>下载任务</h1><p>${running} 个任务进行中，最多同时运行 3 个。</p></div><button class="outline-btn" data-action="clear-jobs">清除已完成</button></div>
+ const running = state.jobs.filter(j=>j.status==='running'||j.status==='canceling').length;
+ return `<div class="page-heading inner-heading"><div><h1>下载任务</h1><p>${running} 个任务进行中，最多同时运行 3 个。</p></div><div class="heading-actions"><button class="outline-btn" data-action="cancel-all-jobs" ${activeJobCount()?'':'disabled'}>取消全部</button><button class="outline-btn" data-action="clear-jobs">清除已结束</button></div></div>
  <div class="section-title"><div><h3>任务列表 <span class="count">${state.jobs.length}</span></h3></div></div><div id="job-list">${jobList()}</div>`;
 }
 function jobList() {
  if (!state.jobs.length) return `<div class="empty-state job-empty">${icon('download',27)}<strong>还没有下载任务</strong><p>选择游戏、Java 或模组后即可加入任务列表。</p></div>`;
  return state.jobs.slice().reverse().map(job => {
-  const labels={queued:'等待中',running:'下载中',done:'已完成',failed:'失败'};
+  const labels={queued:'等待中',running:'进行中',canceling:'正在取消',cancelled:'已取消',done:'已完成',failed:'失败'};
   const percent=job.total ? Math.min(100,Math.round(job.current/job.total*100)) : 0;
-  return `<article class="job-card ${job.status}" data-job-id="${esc(job.id)}"><div class="job-top"><div class="job-icon">${icon(job.kind==='java' ? 'monitor' : job.kind==='mod' ? 'blocks' : 'box',18)}</div><div class="job-info"><strong>${esc(job.title)}</strong><small class="job-message">${esc(job.message || labels[job.status])}</small></div><span class="job-state">${labels[job.status]}</span></div><div class="job-progress-line"><div class="progress-track"><i class="job-track" style="width:${job.status==='done' ? 100 : percent}%"></i></div><span class="job-count">${job.total ? `${job.current} / ${job.total}` : (job.status==='queued' ? '排队中' : job.status==='done' ? '完成' : '—')}</span></div>${job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${job.status==='failed' ? `<div class="job-actions"><button class="row-button" data-retry-job="${esc(job.id)}">${icon('refresh-cw',14)} 重试</button></div>` : ''}</article>`;
+  return `<article class="job-card ${job.status}" data-job-id="${esc(job.id)}"><div class="job-top"><div class="job-icon">${icon(job.kind==='java' ? 'monitor' : job.kind==='mod' ? 'blocks' : 'box',18)}</div><div class="job-info"><strong>${esc(job.title)}</strong><small class="job-message">${esc(job.message || labels[job.status])}</small></div><span class="job-state">${labels[job.status]}</span></div><div class="job-progress-line"><div class="progress-track"><i class="job-track" style="width:${job.status==='done' ? 100 : percent}%"></i></div><span class="job-count">${job.total ? `${job.current} / ${job.total}` : (job.status==='queued' ? '排队中' : job.status==='done' ? '完成' : '—')}</span></div>${job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${['queued','running','canceling','failed','cancelled','done'].includes(job.status) ? `<div class="job-actions">${['queued','running','canceling'].includes(job.status)?`<button class="row-button" data-cancel-job="${esc(job.id)}" ${job.status==='canceling'?'disabled':''}>${job.status==='canceling'?'正在取消…':'取消任务'}</button>`:''}${['failed','cancelled'].includes(job.status)?`<button class="row-button" data-retry-job="${esc(job.id)}">${icon('refresh-cw',14)} 重试</button>`:''}${['failed','cancelled','done'].includes(job.status)?`<button class="row-button" data-remove-job="${esc(job.id)}">移除记录</button>`:''}</div>` : ''}</article>`;
  }).join('');
 }
 function renderJobList() { const list=app.querySelector('#job-list'); if (list) { list.innerHTML=jobList(); hydrateIcons(); } renderChrome(); }
@@ -221,28 +221,35 @@ async function refreshInstalled(dir) {
   const installed=await invoke('installed_versions',{gameDir:dir}); const byId=new Map(installed.map(v=>[v.id,v]));
   if (state.online) { const known=new Set(state.versions.map(v=>v.id)); const extra=installed.filter(v=>!known.has(v.id)); state.versions=[...extra,...state.versions.map(v=>v.kind==='正式版'?{...v,installed:byId.has(v.id)}:byId.get(v.id)).filter(Boolean)]; }
   else state.versions=installed;
-  if (!state.selected) { state.selected=installed[0]?.id || ''; persist(); }
+  if (!installed.some(v=>v.id===state.selected)) { state.selected=installed[0]?.id || ''; persist(); }
   if (state.page==='versions' || state.page==='home') render(); else renderChrome();
  } catch (e) { flash(`无法刷新已安装版本：${e}`,'error'); }
 }
 let jobSerial=0;
-function hasJob(key) { return state.jobs.some(j=>j.key===key && (j.status==='queued'||j.status==='running')); }
+function hasJob(key) { return state.jobs.some(j=>j.key===key && (['queued','running','canceling'].includes(j.status))); }
 function enqueueJob(spec) {
  if (hasJob(spec.key)) { flash('该项目已在下载任务中。'); return; }
  const job={...spec,id:`job-${Date.now()}-${++jobSerial}`,status:'queued',message:'等待中',current:0,total:0,error:''};
  state.jobs.push(job); renderJobList(); flash(`已加入下载任务：${job.title}`); pumpJobs();
 }
 function pumpJobs() {
- while (state.jobs.filter(j=>j.status==='running').length < 3) {
+ while (state.jobs.filter(j=>j.status==='running'||j.status==='canceling').length < 3) {
   const job=state.jobs.find(j=>j.status==='queued'); if (!job) break;
   job.status='running'; job.message='正在准备'; renderJobList();
-  Promise.resolve().then(()=>job.run(job)).then(()=>{ job.status='done'; job.message=job.kind==='export'?'导出完成':job.kind==='import'?'导入完成':'安装完成'; job.current=job.total; }).catch(e=>{ job.status='failed'; job.message=job.kind==='export'?'导出失败':job.kind==='import'?'导入失败':'安装失败'; job.error=String(e); }).finally(async()=>{
+  Promise.resolve().then(async()=>{ await invoke('begin_job',{jobId:job.id,gameDir:job.gameDir||null});job.registered=true;if(job.cancelRequested){await invoke('cancel_job',{jobId:job.id});throw new Error('任务已取消');}await job.run(job); }).then(()=>{ job.status='done'; job.message=job.kind==='export'?'导出完成':job.kind==='import'?'导入完成':'安装完成'; job.current=job.total; }).catch(e=>{ if(job.cancelRequested){job.status='cancelled';job.message='已取消';job.error='';} else {job.status='failed'; job.message=job.kind==='export'?'导出失败':job.kind==='import'?'导入失败':'安装失败'; job.error=String(e);} }).finally(async()=>{
+   if(job.registered) {try {await invoke('end_job',{jobId:job.id});} catch(e) {flash(`任务清理失败：${e}`,'error');}}
    if (job.gameDir) await refreshInstalled(job.gameDir);
    if (job.kind==='java') { try { state.javaRuntimes=await invoke('list_java'); if(state.page==='java') render(); } catch {} }
    if (job.kind==='mod' && state.page==='content' && job.version===state.contentTarget && job.gameDir===state.gameDir) { await refreshMods(); await searchContent(); }
    renderJobList(); pumpJobs();
   });
  }
+}
+async function requestJobCancel(job) {
+ if(job.status==='queued'){job.status='cancelled';job.message='已取消';renderJobList();return;}
+ if(job.status!=='running')return;
+ job.cancelRequested=true;job.status='canceling';job.message='正在取消并清理…';renderJobList();
+ if(job.registered){try{await invoke('cancel_job',{jobId:job.id});}catch(e){if(job.status==='canceling'){job.cancelRequested=false;job.status='running';job.message='取消失败，任务仍在进行';renderJobList();flash(`取消失败：${e}`,'error');}}}
 }
 function jobEvent(payload) {
  const job=state.jobs.find(j=>j.id===payload.jobId); if (!job || job.status!=='running') return;
@@ -255,9 +262,10 @@ function queueVersion(draft) {
  const key=`game:${gameDir}:${selectedVersion}:${draft.loader}`;
  enqueueJob({key,kind:'game',title:`Minecraft ${selectedVersion}${draft.loader==='vanilla'?'':` · ${draft.loader}`}`,gameDir,run:async job=>{
   await invoke('install_version',{version:selectedVersion,gameDir,jobId:job.id});
+  if(job.cancelRequested) throw new Error('任务已取消');
   const result=draft.loader==='vanilla' ? selectedVersion : await invoke('install_loader',{gameVersion:selectedVersion,gameDir,loader:draft.loader,loaderVersion:null,javaPath,jobId:job.id});
   job.resultVersion=result;
-  for (let i=0;i<draft.addons.length;i++) { updateJob(job,{message:`正在安装附加模组 ${draft.addons[i]}（${i+1}/${draft.addons.length}）`,current:0,total:0}); try { await invoke('install_mod',{gameDir,version:result,source:'modrinth',projectId:draft.addons[i],apiKey:'',modVersionId:null,jobId:job.id}); } catch(e) { throw `游戏和加载器已安装；附加模组 ${draft.addons[i]} 安装失败：${e}`; } }
+  for (let i=0;i<draft.addons.length;i++) { if(job.cancelRequested) throw new Error('任务已取消'); updateJob(job,{message:`正在安装附加模组 ${draft.addons[i]}（${i+1}/${draft.addons.length}）`,current:0,total:0}); try { await invoke('install_mod',{gameDir,version:result,source:'modrinth',projectId:draft.addons[i],apiKey:'',modVersionId:null,jobId:job.id}); } catch(e) { if(job.cancelRequested) throw e; throw `游戏和加载器已安装；附加模组 ${draft.addons[i]} 安装失败：${e}`; } }
  }});
 }
 function javaPage() {
@@ -280,12 +288,13 @@ async function refreshJava() {
 let renderedPage = null;
 let composingSearch = false;
 let pendingCompositionRender = false;
-function activeJobCount() { return state.jobs.filter(j => j.status === 'queued' || j.status === 'running').length; }
+function activeJobCount() { return state.jobs.filter(j => ['queued','running','canceling'].includes(j.status)).length; }
 function renderChrome() {
  const root = app.querySelector('#toast-root'); if (!root) return;
  root.innerHTML = state.notice ? `<div class="toast ${state.noticeKind}">${esc(state.notice)}${state.crash ? '<button class="toast-log" data-action="open-crash-log">查看日志</button>' : ''}<button data-action="dismiss" aria-label="关闭">${icon('x',15)}</button></div>` : '';
  const badge = app.querySelector('.job-badge'); if (badge) { const n = activeJobCount(); badge.textContent = n ? String(n) : ''; badge.classList.toggle('has-jobs', !!n); }
- const footer = app.querySelector('.side-footer'); if (footer) footer.innerHTML = `<span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.2</span>`;
+ const cancelAll=app.querySelector('[data-action="cancel-all-jobs"]');if(cancelAll)cancelAll.disabled=!state.jobs.some(j=>j.status==='queued'||j.status==='running');
+ const footer = app.querySelector('.side-footer'); if (footer) footer.innerHTML = `<span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.3</span>`;
  const count = app.querySelector('.side-card strong'); if (count) count.innerHTML = `${String(state.versions.filter(v=>v.installed).length).padStart(2,'0')} <small>个版本</small>`;
  hydrateIcons();
 }
@@ -332,6 +341,7 @@ app.addEventListener('click', async event => {
  if (windowControl) { if (isTauri()) { try { const win=getCurrentWindow(); if (windowControl.dataset.window==='minimize') await win.minimize(); else if(windowControl.dataset.window==='maximize') await win.toggleMaximize(); else if(windowControl.dataset.window==='close') await win.close(); } catch(e) { flash(`窗口操作失败：${e}`,'error'); } } return; }
  const page = event.target.closest('[data-page]'); if (page) { state.page = page.dataset.page; render(); if (state.page === 'java') await refreshJava(); if (state.page === 'multiplayer' && state.lanView==='room') await refreshLanAddresses(); if (state.page === 'multiplayer' && state.lanView==='servers' && !state.serverCatalog) await refreshPublicServers(); if (state.page === 'content') { if(!state.contentTarget || !state.versions.some(v=>v.installed && v.id===state.contentTarget)) state.contentTarget=state.selected || ''; await refreshMods(); } return; }
  const openFolder = event.target.closest('[data-open-version-folder]'); if (openFolder) { try { await invoke('open_version_folder',{gameDir:state.gameDir,version:openFolder.dataset.openVersionFolder}); } catch(e) { flash(String(e),'error'); } return; }
+ const deleteVersion=event.target.closest('[data-delete-version]');if(deleteVersion) {const version=state.versions.find(v=>v.id===deleteVersion.dataset.deleteVersion&&v.installed);if(version){state.versionDelete={id:version.id,name:version.name||version.id,isolated:!!version.isolated,gameDir:state.gameDir};render();}return;}
  const exportButton=event.target.closest('[data-export-game]'); if(exportButton) { state.archiveDraft={kind:'export',version:exportButton.dataset.exportGame,gameDir:state.gameDir}; renderOverlay(); return; }
  const select = event.target.closest('[data-select]'); if (select) { state.selected = select.dataset.select; persist(); render(); flash(`已选择 ${state.selected}`); return; }
  const install = event.target.closest('[data-install]'); if (install) { state.installDraft={version:install.dataset.install,loader:'vanilla',addons:[]}; renderOverlay(); return; }
@@ -363,7 +373,12 @@ app.addEventListener('click', async event => {
   }}); if(state.page==='java') render(); return;
  }
  const retry=event.target.closest('[data-retry-job]'); if (retry) { const old=state.jobs.find(j=>j.id===retry.dataset.retryJob); if (old) enqueueJob({key:old.key,kind:old.kind,title:old.title,gameDir:old.gameDir,version:old.version,run:old.run}); return; }
+ const removeJob=event.target.closest('[data-remove-job]');if(removeJob){state.jobs=state.jobs.filter(j=>j.id!==removeJob.dataset.removeJob||!['done','failed','cancelled'].includes(j.status));renderJobList();return;}
+ const cancelJob=event.target.closest('[data-cancel-job]');if(cancelJob){const job=state.jobs.find(j=>j.id===cancelJob.dataset.cancelJob);if(job){await requestJobCancel(job);pumpJobs();}return;}
  const action = event.target.closest('[data-action]')?.dataset.action;
+ if(action==='cancel-all-jobs'){await Promise.all(state.jobs.filter(j=>j.status==='queued'||j.status==='running').map(requestJobCancel));pumpJobs();return;}
+ if(action==='cancel-version-delete'){state.versionDelete=null;render();return;}
+ if(action==='confirm-version-delete' && state.versionDelete && !state.versionDeleting){const d=state.versionDelete,removeInstance=!!app.querySelector('#delete-instance-data')?.checked;if(state.jobs.some(j=>j.gameDir===d.gameDir&&['queued','running','canceling'].includes(j.status))){flash('该游戏目录有进行中或等待中的任务，请先取消或等待结束。','error');return;}state.versionDeleting=true;render();try{await invoke('delete_version',{gameDir:d.gameDir,version:d.id,removeInstance});state.versionDelete=null;if(state.selected===d.id)state.selected='';if(state.contentTarget===d.id){state.contentTarget='';state.localMods=[];state.contentResults=[];}await refreshInstalled(d.gameDir);persist();flash('版本已删除。');}catch(e){flash(`删除失败：${e}`,'error');}finally{state.versionDeleting=false;render();}return;}
  const lanView=event.target.closest('[data-lan-view]'); if(lanView) { state.lanView=lanView.dataset.lanView;render();if(state.lanView==='servers'&&!state.serverCatalog&&!state.serverLoading) await refreshPublicServers();return; }
  const serverCopy=event.target.closest('[data-server-copy]');if(serverCopy) { const entry=filteredServers()[Number(serverCopy.dataset.serverCopy)];if(entry) { try { await copyText(entry.address);flash('服务器地址已复制，在游戏中选择“多人游戏 → 直接连接”粘贴。'); } catch(e) { flash(`复制失败：${e}`,'error'); } }return; }
  const serverPage=event.target.closest('[data-server-page]');if(serverPage) { state.serverPage=Math.max(0,Number(serverPage.dataset.serverPage));render();return; }
@@ -401,7 +416,7 @@ app.addEventListener('click', async event => {
  if(action==='confirm-mod-install' && state.modDraft) { const draft=state.modDraft; const modVersionId=app.querySelector('input[name=modVersion]:checked')?.value; if(!modVersionId) return; state.modDraft=null; renderOverlay(); enqueueJob({key:`mod:${draft.source}:${draft.projectId}:${draft.gameDir}:${draft.target}`,kind:'mod',title:`${draft.title} · ${draft.target}`,gameDir:draft.gameDir,version:draft.target,run:job=>invoke('install_mod',{gameDir:draft.gameDir,version:draft.target,source:draft.source,projectId:draft.projectId,apiKey:draft.apiKey,modVersionId,jobId:job.id})}); }
  if (action === 'close-install' || (action === 'close-install-backdrop' && event.target.classList.contains('install-overlay'))) { state.installDraft = null; renderOverlay(); }
  if (action === 'confirm-install' && state.installDraft) { const draft={...state.installDraft,addons:[...state.installDraft.addons]}; state.installDraft=null; renderOverlay(); queueVersion(draft); }
- if (action === 'clear-jobs') { state.jobs=state.jobs.filter(j=>j.status!=='done'); if (state.page==='downloads') render(); else renderChrome(); }
+ if (action === 'clear-jobs') { state.jobs=state.jobs.filter(j=>!['done','failed','cancelled'].includes(j.status)); if (state.page==='downloads') render(); else renderChrome(); }
  if (action === 'refresh') await refresh();
  if (action === 'refresh-java') await refreshJava();
  if (action === 'cancel-mod-remove') { state.modDelete = null; render(); }

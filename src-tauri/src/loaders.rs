@@ -101,6 +101,30 @@ pub async fn install_loader(
     java_path: Option<String>,
     job_id: Option<String>,
 ) -> ResultT<String> {
+    let id = job_id.clone();
+    crate::jobs::race(
+        id.as_deref(),
+        install_loader_impl(
+            app,
+            game_dir,
+            game_version,
+            loader,
+            loader_version,
+            java_path,
+            job_id,
+        ),
+    )
+    .await
+}
+async fn install_loader_impl(
+    app: tauri::AppHandle,
+    game_dir: String,
+    game_version: String,
+    loader: String,
+    loader_version: Option<String>,
+    java_path: Option<String>,
+    job_id: Option<String>,
+) -> ResultT<String> {
     let dir = root(&game_dir)?;
     version_id(&game_version)?;
     let _loader_lock =
@@ -271,6 +295,7 @@ pub async fn install_loader(
             .lock_owned()
             .await;
         let mut command = tokio::process::Command::new(java);
+        command.kill_on_drop(true);
         command
             .arg("-jar")
             .arg(&installer)

@@ -130,9 +130,12 @@ fn collect_files(
     relative: &Path,
     include_saves: bool,
     files: &mut Vec<(PathBuf, String)>,
+    job: Option<&str>,
 ) -> ResultT<()> {
+    crate::jobs::check(job)?;
     let entries = fs::read_dir(dir.join(relative)).map_err(|e| format!("读取游戏文件失败：{e}"))?;
     for entry in entries {
+        crate::jobs::check(job)?;
         let entry = entry.map_err(|e| e.to_string())?;
         let name = entry.file_name();
         let text = name.to_str().ok_or("存在无法导出的文件名")?;
@@ -148,7 +151,7 @@ fn collect_files(
         }
         let child = relative.join(name);
         if file_type.is_dir() {
-            collect_files(dir, &child, include_saves, files)?;
+            collect_files(dir, &child, include_saves, files, job)?;
         } else if file_type.is_file() {
             let path = child
                 .to_str()
@@ -178,13 +181,18 @@ fn manifest_from_zip<R: Read + io::Seek>(zip: &mut ZipArchive<R>) -> ResultT<Arc
     validate_manifest(&manifest)?;
     Ok(manifest)
 }
-fn validate_zip<R: Read + io::Seek>(zip: &mut ZipArchive<R>, include_saves: bool) -> ResultT<()> {
+fn validate_zip<R: Read + io::Seek>(
+    zip: &mut ZipArchive<R>,
+    include_saves: bool,
+    job: Option<&str>,
+) -> ResultT<()> {
     if zip.len() > MAX_FILES + 1 {
         return Err("导出包文件数量过多".into());
     }
     let mut seen = HashSet::new();
     let mut total = 0u64;
     for i in 0..zip.len() {
+        crate::jobs::check(job)?;
         let file = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name();
         if file.is_dir() {
@@ -232,16 +240,17 @@ fn unique() -> String {
         SERIAL.fetch_add(1, Ordering::Relaxed)
     )
 }
-fn read_archive(path: &str) -> ResultT<(ZipArchive<File>, ArchiveManifest)> {
+fn read_archive(path: &str, job: Option<&str>) -> ResultT<(ZipArchive<File>, ArchiveManifest)> {
+    crate::jobs::check(job)?;
     let file = File::open(path).map_err(|e| format!("无法打开导入文件：{e}"))?;
     let mut zip = ZipArchive::new(file).map_err(|e| format!("导入文件不是有效的 ZIP：{e}"))?;
     let manifest = manifest_from_zip(&mut zip)?;
-    validate_zip(&mut zip, manifest.include_saves)?;
+    validate_zip(&mut zip, manifest.include_saves, job)?;
     Ok((zip, manifest))
 }
 #[tauri::command]
 pub async fn inspect_game_archive(path: String) -> ResultT<ArchiveManifest> {
-    tauri::async_runtime::spawn_blocking(move || read_archive(&path).map(|(_, m)| m))
+    tauri::async_runtime::spawn_blocking(move || read_archive(&path, None).map(|(_, m)| m))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -254,12 +263,19 @@ fn export_archive(
 ) -> ResultT<()> {
     let mut files = Vec::new();
     if source.exists() {
-        collect_files(source, Path::new(""), manifest.include_saves, &mut files)?;
+        collect_files(
+            source,
+            Path::new(""),
+            manifest.include_saves,
+            &mut files,
+            job,
+        )?;
     }
     files.sort_by(|a, b| a.1.cmp(&b.1));
     let mut seen = HashSet::new();
     let mut total = 0u64;
     for (path, name) in &files {
+        crate::jobs::check(job)?;
         if !seen.insert(name.to_lowercase()) {
             return Err(format!("文件名大小写冲突：{name}"));
         }
@@ -300,13 +316,19 @@ fn export_archive(
         zip.write_all(&serde_json::to_vec_pretty(manifest).map_err(|e| e.to_string())?)
             .map_err(|e| e.to_string())?;
         for (i, (path, name)) in files.iter().enumerate() {
+            crate::jobs::check(job)?;
             report(app, job, &format!("正在打包 {name}"), i, files.len());
             zip.start_file(format!("instance/{name}"), options)
                 .map_err(|e| e.to_string())?;
-            io::copy(&mut File::open(path).map_err(|e| e.to_string())?, &mut zip)
-                .map_err(|e| format!("打包文件失败：{e}"))?;
+            crate::jobs::copy_checked(
+                &mut File::open(path).map_err(|e| e.to_string())?,
+                &mut zip,
+                job,
+            )
+            .map_err(|e| format!("打包文件失败：{e}"))?;
         }
         zip.finish().map_err(|e| e.to_string())?;
+        crate::jobs::check(job)?;
         let exists = dest.exists();
         if exists {
             if !dest.is_file() {
@@ -357,9 +379,12 @@ pub async fn export_game(
     validate_manifest(&manifest)?;
     let source = loaders::runtime_dir(&dir, &version, &meta);
     let dest = PathBuf::from(path);
-    let _lock = resource_lock(format!("mods:{}", source.display()))
-        .lock_owned()
-        .await;
+    let _lock = crate::jobs::race(job_id.as_deref(), async {
+        Ok(resource_lock(format!("mods:{}", source.display()))
+            .lock_owned()
+            .await)
+    })
+    .await?;
     tauri::async_runtime::spawn_blocking(move || {
         export_archive(&app, &source, &dest, &manifest, job_id.as_deref())
     })
@@ -372,10 +397,11 @@ fn extract_archive(
     staging: &Path,
     job: Option<&str>,
 ) -> ResultT<ArchiveManifest> {
-    let (mut zip, manifest) = read_archive(path)?;
+    let (mut zip, manifest) = read_archive(path, job)?;
     fs::create_dir_all(staging).map_err(|e| e.to_string())?;
     let count = zip.len();
     for i in 0..count {
+        crate::jobs::check(job)?;
         let mut file = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = file.name().to_string();
         if name == "ccl-instance.json" {
@@ -391,7 +417,8 @@ fn extract_archive(
             .write(true)
             .open(target)
             .map_err(|e| e.to_string())?;
-        io::copy(&mut file, &mut output).map_err(|e| format!("解压文件失败：{e}"))?;
+        crate::jobs::copy_checked(&mut file, &mut output, job)
+            .map_err(|e| format!("解压文件失败：{e}"))?;
         report(app, job, &format!("正在导入 {name}"), i, count);
     }
     Ok(manifest)
@@ -404,6 +431,7 @@ pub async fn import_game(
     java_path: String,
     job_id: Option<String>,
 ) -> ResultT<ImportResult> {
+    crate::jobs::check(job_id.as_deref())?;
     let dir = root(&game_dir)?;
     let id = format!("ccl-import-{}", unique());
     version_id(&id)?;
@@ -419,6 +447,10 @@ pub async fn import_game(
         .await
         .map_err(|e| e.to_string())?
     };
+    let extracted = extracted.and_then(|m| {
+        crate::jobs::check(job_id.as_deref())?;
+        Ok(m)
+    });
     let manifest = match extracted {
         Ok(m) => m,
         Err(e) => {
@@ -460,6 +492,7 @@ pub async fn import_game(
         if target.exists() || version_dir.exists() {
             return Err("导入目标已存在，请重试".into());
         }
+        crate::jobs::check(job_id.as_deref())?;
         fs::rename(&staging, &target).map_err(|e| format!("无法保存游戏目录：{e}"))?;
         let save = (|| -> ResultT<()> {
             fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
@@ -512,7 +545,7 @@ mod tests {
         writer.write_all(b"world").unwrap();
         let archive = writer.finish().unwrap();
         let mut zip = ZipArchive::new(Cursor::new(archive.into_inner())).unwrap();
-        assert!(validate_zip(&mut zip, false).is_err());
-        assert!(validate_zip(&mut zip, true).is_ok());
+        assert!(validate_zip(&mut zip, false, None).is_err());
+        assert!(validate_zip(&mut zip, true, None).is_ok());
     }
 }

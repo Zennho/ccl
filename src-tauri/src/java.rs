@@ -89,6 +89,13 @@ fn inspect(path: &Path, managed: bool) -> Option<JavaRuntime> {
         cmd.creation_flags(0x08000000);
     }
     let output = cmd.output().ok()?;
+    runtime_from_output(path, managed, &output)
+}
+fn runtime_from_output(
+    path: &Path,
+    managed: bool,
+    output: &std::process::Output,
+) -> Option<JavaRuntime> {
     if !output.status.success() {
         return None;
     }
@@ -199,10 +206,11 @@ fn platform() -> ResultT<(&'static str, &'static str)> {
     };
     Ok((os, arch))
 }
-fn extract_zip(archive: &Path, target: &Path) -> ResultT<()> {
+fn extract_zip(archive: &Path, target: &Path, job: Option<&str>) -> ResultT<()> {
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
     let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
     for i in 0..zip.len() {
+        crate::jobs::check(job)?;
         let mut entry = zip.by_index(i).map_err(|e| e.to_string())?;
         let name = entry.enclosed_name().ok_or("压缩包包含不安全的路径")?;
         if entry
@@ -219,15 +227,20 @@ fn extract_zip(archive: &Path, target: &Path) -> ResultT<()> {
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             let mut output = fs::File::create(path).map_err(|e| e.to_string())?;
-            std::io::copy(&mut entry, &mut output).map_err(|e| e.to_string())?;
+            crate::jobs::copy_checked(&mut entry, &mut output, job)?;
         }
     }
     Ok(())
 }
-fn extract_tar(archive: &Path, target: &Path) -> ResultT<()> {
+fn extract_tar(archive: &Path, target: &Path, job: Option<&str>) -> ResultT<()> {
     let file = fs::File::open(archive).map_err(|e| e.to_string())?;
-    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(file));
+    let checked = crate::jobs::CheckedReader {
+        inner: file,
+        job: job.map(str::to_owned),
+    };
+    let mut tar = tar::Archive::new(flate2::read::GzDecoder::new(checked));
     for entry in tar.entries().map_err(|e| e.to_string())? {
+        crate::jobs::check(job)?;
         let mut entry = entry.map_err(|e| e.to_string())?;
         let path = entry.path().map_err(|e| e.to_string())?.into_owned();
         if path.is_absolute()
@@ -292,31 +305,41 @@ async fn install_impl(
         fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    let _cleanup = crate::jobs::CleanupPath::dir(staging.clone());
     let result = async {
+        crate::jobs::check(job_id)?;
         progress(app, job_id, "正在获取 Java 版本信息", 0, 0);
         let client = http_client()?;
         let url = format!("https://api.adoptium.net/v3/assets/latest/{major}/hotspot?architecture={arch}&image_type=jre&os={os}&vendor=eclipse");
-        let data: Value = client.get(url).timeout(Duration::from_secs(30)).send().await.map_err(|e| format!("无法获取 Java 下载信息: {e:#}"))?.error_for_status().map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string())?;
+        let data: Value = crate::jobs::race(job_id, async { client.get(url).timeout(Duration::from_secs(30)).send().await.map_err(|e| format!("无法获取 Java 下载信息: {e:#}"))?.error_for_status().map_err(|e| e.to_string())?.json().await.map_err(|e| e.to_string()) }).await?;
         let package = &data.as_array().and_then(|a| a.first()).ok_or("该平台没有可用的 Java 版本")?["binary"]["package"];
         let link = package["link"].as_str().ok_or("缺少 Java 下载地址")?;
         let checksum = package["checksum"].as_str().filter(|s| s.len() == 64 && s.bytes().all(|c| c.is_ascii_hexdigit())).ok_or("缺少有效的 Java SHA-256 校验值")?;
         if !link.starts_with("https://") { return Err("Java 下载地址无效".into()); }
         let archive_path = staging.join("download.archive");
-        let slot = crate::download_slot().await?;
-        let mut response = client.get(link).timeout(Duration::from_secs(900)).send().await.map_err(|e| format!("Java 下载失败: {e:#}"))?.error_for_status().map_err(|e| e.to_string())?;
+        let slot = crate::jobs::race(job_id, crate::download_slot()).await?;
+        let mut response = crate::jobs::race(job_id, async { client.get(link).timeout(Duration::from_secs(900)).send().await.map_err(|e| format!("Java 下载失败: {e:#}"))?.error_for_status().map_err(|e| e.to_string()) }).await?;
         let total = response.content_length().or_else(|| package["size"].as_u64()).unwrap_or(0);
         let mut file = tokio::fs::File::create(&archive_path).await.map_err(|e| e.to_string())?;
         let mut hash = Sha256::new(); let mut current = 0u64; let mut last_progress = std::time::Instant::now();
-        while let Some(chunk) = response.chunk().await.map_err(|e| format!("Java 下载中断: {e:#}"))? { hash.update(&chunk); file.write_all(&chunk).await.map_err(|e| e.to_string())?; current += chunk.len() as u64; if last_progress.elapsed() >= Duration::from_millis(250) { progress(app, job_id, "正在下载 Java", current, total); last_progress = std::time::Instant::now(); } }
+        while let Some(chunk) = crate::jobs::race(job_id, async { response.chunk().await.map_err(|e| format!("Java 下载中断: {e:#}")) }).await? { hash.update(&chunk); file.write_all(&chunk).await.map_err(|e| e.to_string())?; current += chunk.len() as u64; if last_progress.elapsed() >= Duration::from_millis(250) { progress(app, job_id, "正在下载 Java", current, total); last_progress = std::time::Instant::now(); } }
         file.flush().await.map_err(|e| e.to_string())?; drop(file); drop(slot);
         if format!("{:x}", hash.finalize()) != checksum.to_ascii_lowercase() { return Err("Java 文件 SHA-256 校验失败".into()); }
         progress(app, job_id, "正在解压并验证 Java", 0, 0);
         let unpack_dir = staging.join("runtime"); fs::create_dir_all(&unpack_dir).map_err(|e| e.to_string())?;
         let archive = archive_path.clone(); let extract = unpack_dir.clone();
-        tokio::task::spawn_blocking(move || if os == "windows" { extract_zip(&archive, &extract) } else { extract_tar(&archive, &extract) }).await.map_err(|e| e.to_string())??;
+        let extraction_job = job_id.map(str::to_owned);
+        tokio::task::spawn_blocking(move || if os == "windows" { extract_zip(&archive, &extract, extraction_job.as_deref()) } else { extract_tar(&archive, &extract, extraction_job.as_deref()) }).await.map_err(|e| e.to_string())??;
+        crate::jobs::check(job_id)?;
         let java = locate_java(&unpack_dir, 4).ok_or("Java 安装包中未找到可执行文件")?;
         let relative = java.strip_prefix(&unpack_dir).map_err(|e| e.to_string())?.to_path_buf();
-        let checked = tokio::task::spawn_blocking(move || inspect(&java, true)).await.map_err(|e| e.to_string())?.ok_or("下载的 Java 无法运行")?;
+        let mut command=tokio::process::Command::new(&java);
+        command.arg("-version").kill_on_drop(true);
+        #[cfg(windows)]
+        { command.creation_flags(0x08000000); }
+        let output=crate::jobs::race(job_id,async {tokio::time::timeout(Duration::from_secs(15),command.output()).await.map_err(|_|"Java 验证超时".to_string())?.map_err(|e|format!("Java 验证失败：{e}"))}).await?;
+        let checked = runtime_from_output(&java,true,&output).ok_or("下载的 Java 无法运行")?;
+        crate::jobs::check(job_id)?;
         if checked.major != Some(major) { return Err("下载的 Java 版本与请求不匹配".into()); }
         fs::rename(&unpack_dir, &final_dir).map_err(|e| e.to_string())?;
         Ok(JavaRuntime { path: final_dir.join(relative).to_string_lossy().to_string(), ..checked })
@@ -331,9 +354,12 @@ pub async fn install_java(
     job_id: Option<String>,
 ) -> ResultT<JavaRuntime> {
     validate_major(major)?;
-    let _lock = crate::resource_lock(format!("java:{major}"))
-        .lock_owned()
-        .await;
+    let _lock = crate::jobs::race(job_id.as_deref(), async {
+        Ok(crate::resource_lock(format!("java:{major}"))
+            .lock_owned()
+            .await)
+    })
+    .await?;
     install_impl(&app, major, job_id.as_deref()).await
 }
 #[tauri::command]

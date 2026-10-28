@@ -640,6 +640,32 @@ pub async fn install_mod(
     mod_version_id: Option<String>,
     job_id: Option<String>,
 ) -> ResultT<usize> {
+    let id = job_id.clone();
+    crate::jobs::race(
+        id.as_deref(),
+        install_mod_impl(
+            app,
+            game_dir,
+            version,
+            source,
+            project_id,
+            api_key,
+            mod_version_id,
+            job_id,
+        ),
+    )
+    .await
+}
+async fn install_mod_impl(
+    app: tauri::AppHandle,
+    game_dir: String,
+    version: String,
+    source: String,
+    project_id: String,
+    api_key: String,
+    mod_version_id: Option<String>,
+    job_id: Option<String>,
+) -> ResultT<usize> {
     let (dir, game, loader) = current_instance(&game_dir, &version)?;
     let _instance_lock = crate::resource_lock(format!("mods:{}", dir.display()))
         .lock_owned()
@@ -813,6 +839,7 @@ pub async fn install_mod(
             }
         }
     }
+    crate::jobs::check(job_id.as_deref())?;
     let target = dir.join("mods");
     fs::create_dir_all(&target).map_err(|e| e.to_string())?;
     for (name, bytes) in &downloads {
@@ -880,7 +907,13 @@ fn read_pack_manifest(bytes: &[u8], source: &str) -> ResultT<Value> {
     file.read_to_end(&mut data).map_err(|e| e.to_string())?;
     serde_json::from_slice(&data).map_err(|e| format!("整合包清单解析失败: {e}"))
 }
-fn apply_overrides(bytes: &[u8], target: &Path, source: &str, manifest: &Value) -> ResultT<()> {
+fn apply_overrides(
+    bytes: &[u8],
+    target: &Path,
+    source: &str,
+    manifest: &Value,
+    job: Option<&str>,
+) -> ResultT<()> {
     let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes)).map_err(|e| e.to_string())?;
     let cf_override = manifest["overrides"].as_str().unwrap_or("overrides");
     safe_relative(cf_override)?;
@@ -890,7 +923,9 @@ fn apply_overrides(bytes: &[u8], target: &Path, source: &str, manifest: &Value) 
         vec![format!("{cf_override}/")]
     };
     for prefix in prefixes {
+        crate::jobs::check(job)?;
         for i in 0..zip.len() {
+            crate::jobs::check(job)?;
             let mut file = zip.by_index(i).map_err(|e| e.to_string())?;
             let name = file.name().to_string();
             let Some(relative) = name.strip_prefix(&prefix) else {
@@ -907,13 +942,31 @@ fn apply_overrides(bytes: &[u8], target: &Path, source: &str, manifest: &Value) 
                 fs::create_dir_all(parent).map_err(|e| e.to_string())?;
             }
             let mut output = fs::File::create(path).map_err(|e| e.to_string())?;
-            std::io::copy(&mut file, &mut output).map_err(|e| e.to_string())?;
+            crate::jobs::copy_checked(&mut file, &mut output, job)?;
         }
     }
     Ok(())
 }
 #[tauri::command]
 pub async fn install_modpack(
+    app: tauri::AppHandle,
+    game_dir: String,
+    source: String,
+    project_id: String,
+    api_key: String,
+    java_path: String,
+    job_id: Option<String>,
+) -> ResultT<String> {
+    let id = job_id.clone();
+    crate::jobs::race(
+        id.as_deref(),
+        install_modpack_impl(
+            app, game_dir, source, project_id, api_key, java_path, job_id,
+        ),
+    )
+    .await
+}
+async fn install_modpack_impl(
     app: tauri::AppHandle,
     game_dir: String,
     source: String,
@@ -1094,6 +1147,7 @@ pub async fn install_modpack(
         fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
     }
     fs::create_dir_all(&staging).map_err(|e| e.to_string())?;
+    let _cleanup = crate::jobs::CleanupPath::dir(staging.clone());
     let outcome: ResultT<()> = async {
         let files = manifest["files"].as_array().ok_or("整合包缺少文件清单")?;
         let mut downloads = stream::iter(files.clone().into_iter().map(|file| {
@@ -1160,13 +1214,9 @@ pub async fn install_modpack(
                 }
                 let path = staging.join(relative);
                 if let Some(parent) = path.parent() {
-                    tokio::fs::create_dir_all(parent)
-                        .await
-                        .map_err(|e| e.to_string())?;
+                    fs::create_dir_all(parent).map_err(|e| e.to_string())?;
                 }
-                tokio::fs::write(path, data)
-                    .await
-                    .map_err(|e| e.to_string())?;
+                fs::write(path, data).map_err(|e| e.to_string())?;
             }
             completed += 1;
             if completed == files.len() || last_report.elapsed() >= Duration::from_millis(150) {
@@ -1181,7 +1231,8 @@ pub async fn install_modpack(
             }
         }
         drop(downloads);
-        apply_overrides(&package, &staging, &source, &manifest)?;
+        apply_overrides(&package, &staging, &source, &manifest, job_id.as_deref())?;
+        crate::jobs::check(job_id.as_deref())?;
         fs::rename(&staging, &target).map_err(|e| e.to_string())?;
         let publish = (|| -> ResultT<()> {
             fs::create_dir_all(&version_dir).map_err(|e| e.to_string())?;
@@ -1245,13 +1296,14 @@ mod tests {
         fs::create_dir_all(&root).unwrap();
         let data = archive("overrides/config/test.txt");
         let manifest = read_pack_manifest(&data, "modrinth").unwrap();
-        apply_overrides(&data, &root, "modrinth", &manifest).unwrap();
+        apply_overrides(&data, &root, "modrinth", &manifest, None).unwrap();
         assert_eq!(fs::read(root.join("config/test.txt")).unwrap(), b"test");
         assert!(apply_overrides(
             &archive("overrides/../../escape.txt"),
             &root,
             "modrinth",
-            &manifest
+            &manifest,
+            None
         )
         .is_err());
         fs::remove_dir_all(root).unwrap();
