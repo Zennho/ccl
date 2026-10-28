@@ -33,3 +33,5 @@
 .theme-preview-background div{background-image:var(--ccl-background-image);opacity:var(--ccl-background-opacity);filter:blur(var(--ccl-background-blur));transform:scale(1.12)}
 .theme-preview-background i{background:rgba(245,240,229,var(--ccl-background-frost));-webkit-backdrop-filter:blur(calc(var(--ccl-background-frost) * 10px));backdrop-filter:blur(calc(var(--ccl-background-frost) * 10px))}
 .theme-upload:focus-within{outline:2px solid #769c68;outline-offset:2px}
+.content-project-link{display:block;max-width:100%;overflow-wrap:anywhere;background:none;border:0;padding:7px 0 0;text-align:left;color:#6f8d5f;font-size:11px}
+.content-project-link:hover{text-decoration:underline}

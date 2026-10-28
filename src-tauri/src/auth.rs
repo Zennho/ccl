@@ -174,7 +174,7 @@ fn authorization_url(
         .append_pair("prompt", "select_account");
     Ok(url.to_string())
 }
-fn open_browser(url: &str) -> ResultT<()> {
+pub(crate) fn open_browser(url: &str) -> ResultT<()> {
     #[cfg(target_os = "windows")]
     let mut cmd = {
         let mut c = std::process::Command::new("rundll32.exe");

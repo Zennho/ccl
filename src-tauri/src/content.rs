@@ -22,6 +22,7 @@ pub struct ContentHit {
     source: String,
     installed: bool,
     icon_url: Option<String>,
+    project_url: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -38,6 +39,41 @@ fn content_icon(value: &Value, source: &str) -> Option<String> {
             .or_else(|| value["logo"]["url"].as_str())
     }
     .map(str::to_string)
+}
+
+fn project_url(value: &Value, source: &str, kind: &str, id: &str) -> Option<String> {
+    let slug = value["slug"].as_str().filter(|slug| valid_id(slug).is_ok());
+    match (source, kind) {
+        ("modrinth", "mod" | "modpack") => {
+            let part = slug.unwrap_or(id);
+            valid_id(part).ok()?;
+            Some(format!("https://modrinth.com/{kind}/{part}"))
+        }
+        ("curseforge", "mod" | "modpack") => {
+            let section = if kind == "mod" { "mc-mods" } else { "modpacks" };
+            Some(format!(
+                "https://www.curseforge.com/minecraft/{section}/{}",
+                slug?
+            ))
+        }
+        _ => None,
+    }
+}
+#[tauri::command]
+pub fn open_content_page(url: String) -> ResultT<()> {
+    let parsed = reqwest::Url::parse(&url).map_err(|_| "项目网址无效")?;
+    if parsed.scheme() != "https"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_some()
+        || !matches!(
+            parsed.host_str(),
+            Some("modrinth.com" | "www.curseforge.com")
+        )
+    {
+        return Err("项目网址不受支持".into());
+    }
+    crate::auth::open_browser(parsed.as_str())
 }
 
 fn valid_id(id: &str) -> ResultT<()> {
@@ -217,6 +253,7 @@ pub async fn search_content(
                 installed: installed.contains_key(&id),
                 source: source.clone(),
                 icon_url: content_icon(v, &source),
+                project_url: project_url(v, &source, &kind, &id),
             })
         })
         .collect();
@@ -1274,6 +1311,27 @@ mod tests {
         );
         assert_eq!(content_icon(&json!({"logo":{"thumbnailUrl":"https://media.forgecdn.net/a.png","url":"https://media.forgecdn.net/b.png"}}), "curseforge").as_deref(), Some("https://media.forgecdn.net/a.png"));
         assert_eq!(content_icon(&json!({"logo":null}), "curseforge"), None);
+    }
+
+    #[test]
+    fn builds_project_links_from_safe_provider_slugs() {
+        assert_eq!(
+            project_url(&json!({"slug":"sodium"}), "modrinth", "mod", "AANobbMI").as_deref(),
+            Some("https://modrinth.com/mod/sodium")
+        );
+        assert_eq!(
+            project_url(&json!({"slug":"better-mc"}), "curseforge", "modpack", "123").as_deref(),
+            Some("https://www.curseforge.com/minecraft/modpacks/better-mc")
+        );
+        assert_eq!(
+            project_url(&json!({"slug":"../../evil"}), "curseforge", "mod", "123"),
+            None
+        );
+        assert_eq!(
+            project_url(&json!({}), "modrinth", "mod", "AANobbMI").as_deref(),
+            Some("https://modrinth.com/mod/AANobbMI")
+        );
+        assert!(open_content_page("https://modrinth.com.evil.example/mod/test".into()).is_err());
     }
 
     fn archive(path: &str) -> Vec<u8> {
