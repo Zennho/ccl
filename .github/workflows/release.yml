@@ -92,4 +92,4 @@ jobs:
           set -euo pipefail
           mapfile -d '' assets < <(find release-assets -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) -print0)
           test "${#assets[@]}" -ge 5
-          gh release create v0.1.7 "${assets[@]}" --target "$GITHUB_SHA" --title 'CCL 0.1.7' --notes-file .github/release-notes.md
+          gh release create v0.1.8 "${assets[@]}" --target "$GITHUB_SHA" --title 'CCL 0.1.8' --notes-file .github/release-notes.md
