@@ -3,10 +3,12 @@
 .has-custom-background .app-shell::before,.has-custom-background .app-shell::after{content:"";position:fixed;inset:0;pointer-events:none}
 .has-custom-background .app-shell::before{z-index:-2;background-image:var(--ccl-background-image);background-size:cover;background-position:center;opacity:var(--ccl-background-opacity);filter:blur(var(--ccl-background-blur));transform:scale(1.08)}
 .has-custom-background .app-shell::after{z-index:-1;background:rgba(245,240,229,var(--ccl-background-frost));-webkit-backdrop-filter:blur(calc(var(--ccl-background-frost) * 10px));backdrop-filter:blur(calc(var(--ccl-background-frost) * 10px))}
-.has-custom-background .sidebar{background:rgba(238,230,215,.82);backdrop-filter:blur(12px)}
-.has-custom-background .window-bar{background:rgba(235,227,213,.9);backdrop-filter:blur(12px)}
+.has-custom-background .sidebar{background:rgba(238,230,215,.32);-webkit-backdrop-filter:none;backdrop-filter:none}
+.has-custom-background .window-bar{background:rgba(235,227,213,.56);-webkit-backdrop-filter:none;backdrop-filter:none}
 .has-custom-background .launch-panel,.has-custom-background .info-card,.has-custom-background .settings-section,.has-custom-background .java-download-card,.has-custom-background .content-search,.has-custom-background .job-card{background:rgba(255,253,247,.88)}
 .hero-custom{position:absolute;inset:0;background-image:var(--ccl-banner-image);background-position:center;background-size:cover;opacity:var(--ccl-banner-opacity)}
+.has-custom-banner .hero-art{background:transparent}
+.has-custom-banner .hero-art> :not(.hero-custom),.has-custom-banner .hero-art::after,.has-custom-banner .home-hero .hero-shade,.has-custom-banner .home-hero .hero-content{display:none}
 .theme-settings{margin-bottom:15px}
 .theme-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-left:59px}
 .theme-card{border:1px solid #e2dbcd;background:#f8f5ed;border-radius:4px;padding:18px}
@@ -35,8 +37,8 @@
 .theme-upload:focus-within{outline:2px solid #769c68;outline-offset:2px}
 .content-project-link{display:block;max-width:100%;overflow-wrap:anywhere;background:none;border:0;padding:7px 0 0;text-align:left;color:#6f8d5f;font-size:11px}
 .content-project-link:hover{text-decoration:underline}
-.content-sort{display:block;margin-top:14px;font-size:11px;color:#72826b}
-.content-sort select{display:block;margin-top:7px}
+.content-selects{flex-wrap:wrap;gap:10px 16px}
+.content-selects select:focus-visible{outline:2px solid #88a47c;outline-offset:2px}
 .content-pagination{display:flex;justify-content:space-between;align-items:center;margin:15px 0;color:#879681;font-size:11px}
 .content-pagination>div{display:flex;gap:8px}
 .project-links{padding:12px 15px;background:#f5f4ed;border:1px solid #e5e3d8;border-radius:4px;margin-bottom:16px}
@@ -45,3 +47,29 @@
 .project-links .content-project-link span{flex:none;font-weight:600;min-width:70px}
 .project-links .content-project-link small{font-size:10px;color:#819079;overflow-wrap:anywhere;min-width:0}
 .project-links p{font-size:10px;color:#95a08d;margin:8px 0 0}
+.project-description{margin:16px 0;padding:15px;background:#f8f6ef;border:1px solid #e5e2d7;border-radius:4px}
+.project-description-head{display:flex;align-items:baseline;justify-content:space-between;gap:12px;margin-bottom:9px}
+.project-description-head strong{font-size:11px;color:#71836a}
+.project-description-head small,.project-description>p{font-size:10px;color:#95a08d;margin:0}
+.project-description-text{max-height:220px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px;line-height:1.7;color:#556451}
+.project-description-text:focus-visible{outline:2px solid #88a47c;outline-offset:3px}
+
+/* Soft glass surfaces follow the existing warm, green palette. */
+.launch-panel,.info-card,.settings-section,.java-download-card,.content-search,.job-card,.identity-card,.identity-preview,.lan-card,.confirm-box,.install-dialog{border-radius:16px;background:rgba(255,253,247,.84);-webkit-backdrop-filter:blur(14px) saturate(1.08);backdrop-filter:blur(14px) saturate(1.08);box-shadow:0 8px 28px rgba(81,79,56,.07)}
+.has-custom-background .launch-panel,.has-custom-background .info-card,.has-custom-background .settings-section,.has-custom-background .java-download-card,.has-custom-background .content-search,.has-custom-background .job-card{background:rgba(255,253,247,.78)}
+.version-list,.server-list{border-radius:14px;background:rgba(255,253,247,.6);-webkit-backdrop-filter:blur(14px) saturate(1.08);backdrop-filter:blur(14px) saturate(1.08)}
+.version-row,.server-row{background:rgba(255,253,247,.48)}
+.versions-list .version-row:first-child{border-radius:13px 13px 0 0}
+.versions-list .version-row:last-child{border-radius:0 0 13px 13px}
+.versions-list .version-row:only-child{border-radius:13px}
+.server-summary,.library-banner{border-radius:16px}
+.server-summary{background:rgba(232,239,226,.78);-webkit-backdrop-filter:blur(14px) saturate(1.08);backdrop-filter:blur(14px) saturate(1.08)}
+.hero,.home-hero{border-radius:16px}
+.theme-card,.project-links,.project-description,.browser-login-panel,.lan-addresses,.lan-hint{border-radius:12px}
+.theme-preview{border-radius:9px}
+.nav button{border-radius:10px}
+.row-button,.outline-btn,.change-version,.play-button,.save-button,.version-menu summary,.loader-card,.addon-option,.mod-version-option{border-radius:9px}
+.version-menu-items{border-radius:11px;box-shadow:0 14px 34px rgba(64,69,52,.16)}
+.version-menu-items button{border-radius:7px}
+.field input:not([type=range]),.content-key input,.content-search-row input,.content-selects select,.target-select select,.server-toolbar input,.server-toolbar select,.lan-input-row input,.version-search input,.skin-controls select,.client-setup input{border-radius:9px}
+.version-cube,.player-icon,.info-icon,.settings-icon,.row-icon,.server-symbol,.avatar{border-radius:10px}

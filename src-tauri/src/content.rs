@@ -176,12 +176,17 @@ fn project_links(value: &Value, source: &str) -> Vec<ProjectLink> {
     }
     result
 }
+#[derive(Serialize)]
+pub struct ContentInfo {
+    links: Vec<ProjectLink>,
+    description: Option<String>,
+}
 #[tauri::command]
 pub async fn content_links(
     source: String,
     project_id: String,
     api_key: String,
-) -> ResultT<Vec<ProjectLink>> {
+) -> ResultT<ContentInfo> {
     valid_id(&project_id)?;
     let client = http_client()?;
     let base = source_url(&source)?;
@@ -191,14 +196,37 @@ pub async fn content_links(
         format!("{base}/mods/{project_id}")
     };
     let data = query_json(request(&client, &path, &source, &api_key)?).await?;
-    Ok(project_links(
-        if source == "curseforge" {
-            &data["data"]
+    let project = if source == "curseforge" {
+        &data["data"]
+    } else {
+        &data
+    };
+    Ok(ContentInfo {
+        links: project_links(project, &source),
+        description: if source == "modrinth" {
+            project["body"].as_str().map(str::to_string)
         } else {
-            &data
+            None
         },
-        &source,
-    ))
+    })
+}
+#[tauri::command]
+pub async fn curseforge_description(
+    project_id: String,
+    api_key: String,
+) -> ResultT<Option<String>> {
+    valid_id(&project_id)?;
+    let client = http_client()?;
+    let source = "curseforge";
+    let base = source_url(source)?;
+    let data = query_json(request(
+        &client,
+        &format!("{base}/mods/{project_id}/description"),
+        source,
+        &api_key,
+    )?)
+    .await?;
+    Ok(data["data"].as_str().map(str::to_string))
 }
 #[tauri::command]
 pub fn open_content_page(url: String) -> ResultT<()> {
