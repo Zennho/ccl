@@ -26,6 +26,25 @@ pub struct ContentHit {
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ContentPage {
+    hits: Vec<ContentHit>,
+    has_more: bool,
+}
+fn content_sort(source: &str, sort: &str) -> ResultT<&'static str> {
+    match (source, sort) {
+        ("modrinth", "recommended") => Ok("relevance"),
+        ("modrinth", "downloads") => Ok("downloads"),
+        ("modrinth", "updated") => Ok("updated"),
+        ("modrinth", "newest") => Ok("newest"),
+        ("curseforge", "recommended") => Ok("2"),
+        ("curseforge", "downloads") => Ok("6"),
+        ("curseforge", "updated") => Ok("3"),
+        ("curseforge", "newest") => Ok("11"),
+        _ => Err("未知排序方式".into()),
+    }
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct LocalMod {
     name: String,
     enabled: bool,
@@ -147,8 +166,15 @@ pub async fn search_content(
     api_key: String,
     game_dir: String,
     version: String,
-) -> ResultT<Vec<ContentHit>> {
+    page: u32,
+    sort: String,
+) -> ResultT<ContentPage> {
     let base = source_url(&source)?;
+    let sort_index = content_sort(&source, &sort)?;
+    if page > 332 {
+        return Err("已达到浏览页数上限".into());
+    }
+    let offset = (page * 30).to_string();
     if kind != "mod" && kind != "modpack" {
         return Err("未知内容类型".into());
     }
@@ -173,6 +199,8 @@ pub async fn search_content(
             request(&client, &format!("{base}/search"), &source, &api_key)?.query(&[
                 ("query", query.as_str()),
                 ("limit", "30"),
+                ("offset", offset.as_str()),
+                ("index", sort_index),
                 ("facets", facets.as_str()),
             ]),
         )
@@ -184,6 +212,9 @@ pub async fn search_content(
                 ("gameId", "432"),
                 ("classId", class),
                 ("pageSize", "30"),
+                ("index", offset.as_str()),
+                ("sortField", sort_index),
+                ("sortOrder", "desc"),
                 ("searchFilter", query.as_str()),
             ]);
         if let Some((_, game, loader)) = &target {
@@ -202,6 +233,17 @@ pub async fn search_content(
     } else {
         &data["data"]
     };
+    let raw_count = entries.as_array().ok_or("搜索结果格式无效")?.len() as u64;
+    let total = if source == "modrinth" {
+        data["total_hits"].as_u64()
+    } else {
+        data["pagination"]["totalCount"].as_u64()
+    };
+    let has_more = page < 332
+        && raw_count > 0
+        && total
+            .map(|n| u64::from(page) * 30 + raw_count < n)
+            .unwrap_or(raw_count == 30);
     let installed = if let Some((dir, _, _)) = &target {
         installed_projects(&client, dir, &source).await?
     } else {
@@ -276,9 +318,12 @@ pub async fn search_content(
         .buffered(6)
         .try_collect::<Vec<_>>()
         .await?;
-        Ok(results.into_iter().flatten().collect())
+        Ok(ContentPage {
+            hits: results.into_iter().flatten().collect(),
+            has_more,
+        })
     } else {
-        Ok(hits)
+        Ok(ContentPage { hits, has_more })
     }
 }
 fn current_instance(game_dir: &str, version: &str) -> ResultT<(PathBuf, String, String)> {
@@ -1332,6 +1377,14 @@ mod tests {
             Some("https://modrinth.com/mod/AANobbMI")
         );
         assert!(open_content_page("https://modrinth.com.evil.example/mod/test".into()).is_err());
+    }
+
+    #[test]
+    fn maps_sorting_to_provider_fields() {
+        assert_eq!(content_sort("modrinth", "downloads").unwrap(), "downloads");
+        assert_eq!(content_sort("curseforge", "downloads").unwrap(), "6");
+        assert_eq!(content_sort("curseforge", "updated").unwrap(), "3");
+        assert!(content_sort("modrinth", "unknown").is_err());
     }
 
     fn archive(path: &str) -> Vec<u8> {

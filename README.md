@@ -1,43 +1,82 @@
 # CCL
 
-使用 Tauri 2 构建的跨平台 Minecraft Java 版启动器，支持 Windows、Linux 和 macOS。
+**CCL 是一个使用 Tauri 2 构建的跨平台 Minecraft: Java Edition 启动器。** 从安装游戏、管理模组到与朋友联机，CCL 希望让这些事情在同一个简洁的界面里完成。
 
-CCL is an independent, open-source Minecraft: Java Edition launcher built with Tauri. It supports game and Java installation, mod management, and Microsoft account sign-in for players who own the game. Microsoft sign-in requires the launcher's application ID to be approved for Minecraft services. CCL is not affiliated with Mojang or Microsoft.
+[下载最新版本](https://github.com/Zennho/ccl/releases/latest) · [报告问题](https://github.com/Zennho/ccl/issues) · [服务器目录](https://github.com/Zennho/ccl-server-catalog) · [MIT 许可证](LICENSE)
 
-## 开发与打包
+CCL is an independent, open-source Minecraft: Java Edition launcher for Windows, Linux and macOS. It is not affiliated with Mojang or Microsoft.
 
-安装 Node.js、Rust 和 [Tauri 2 系统依赖](https://v2.tauri.app/start/prerequisites/)，然后运行：
+## 下载与安装
 
-```sh
-npm install
-npm run tauri dev
-npm run tauri build
-npm test
-```
+前往 [Releases](https://github.com/Zennho/ccl/releases) 下载适合自己系统的安装包：
 
-Windows、Linux、macOS 安装包一般需要分别在对应平台构建。游戏数据默认保存在系统应用数据目录下的 `ccl/minecraft`。
+| 平台 | 安装包 |
+| --- | --- |
+| Windows x64 | `x64-setup.exe` |
+| Linux x64 | `amd64.deb` 或 `amd64.AppImage` |
+| macOS Apple Silicon | `aarch64.dmg` |
+| macOS Intel | `x64.dmg` |
+
+Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未经过 Apple 公证，系统可能提示需要手动确认打开。游戏及其资源需要从各发布服务下载。
 
 ## 功能
 
-- 从 Mojang 版本清单安装原版正式版；并行获取版本清单，安装前抽样比较官方与 BMCLAPI 镜像的下载速度，优先使用较快线路，失败时尝试备用线路。
-- 选择 Minecraft 版本后，可在安装窗口选择 Fabric、Quilt、Forge 或 NeoForge，并可选装兼容的常用模组。Forge 系列使用所选 Java 运行官方安装程序，部分旧版安装器和特殊版本可能不兼容。
-- 检测本机 Java，下载和管理 Eclipse Temurin Java 8、17、21、25；自动校验 SHA-256。发行商没有提供的平台组合会提示无法下载。
-- 从 Modrinth 或 CurseForge 搜索模组与整合包。可为模组选择已安装实例及兼容版本，自动安装必需依赖并标记已安装项目。Modrinth 通过文件哈希识别已有模组；CurseForge 根据 CCL 安装记录识别，其他方式安装的模组仍可在实例模组列表中查看。CurseForge 需要自行提供 API Key，且部分作者不允许第三方启动器下载其文件。
-- 整合包使用独立实例目录，支持 Modrinth `.mrpack` 和 CurseForge 整合包格式。可启用、停用或删除当前实例的模组。
-- 版本管理支持导出 CCL 游戏包（模组、游戏及模组配置、资源包和启动参数，可选世界存档），并导入为独立实例。导入时联网获取游戏本体及对应加载器，Forge 系列需要兼容的 Java；可选择是否覆盖本机启动参数。日志、截图和启动器账号不包含在导出包中。
-- 下载中心最多并行执行 3 个任务；游戏资源和整合包文件并发下载，相同文件会复用。支持取消等待中或进行中的任务、重试及清理记录；取消时会等待后台任务停止并清理临时文件。已完成的游戏文件可在重新安装时复用，任务列表仅在本次运行中保留。
-- 版本管理支持删除已安装的版本文件；默认保留共用资源、存档和模组。独立实例可选择同时删除实例数据。当前启动器会话中正在运行的版本，以及被其他版本依赖的游戏本体不能删除，游戏目录有安装或导入导出任务时需先结束任务。
-- 支持离线用户名或微软正版账户启动，提供账号皮肤上传、默认皮肤恢复、已拥有披风切换以及本地皮肤和披风预览。正版登录通过系统浏览器授权并回调本地启动器，令牌仅保存在本次运行的内存中，重启需要重新登录。
-- 多人联机支持 IPv6：房主先在游戏中对局域网开放并输入游戏显示的端口，CCL 为该本机端口建立 IPv6 TCP 转发，显示可分享的地址；朋友可检测 TCP 连接，并在游戏中使用“多人游戏 → 直接连接”。跨网络联机需要可互通的 IPv6 和允许入站的防火墙/路由器；显示公网候选地址不保证外网可达。房间无额外访问验证，只应将地址分享给可信任的人；关闭房间或启动器会断开转发。
-- 多人联机页提供公开 Java 服务器目录，可按名称、地址、玩法和版本搜索、按快照状态筛选并复制地址。目录由独立的 [CCL 服务器目录仓库](https://github.com/Zennho/ccl-server-catalog)每天从 [Minecraft Java Servers](https://minecraft-java-servers.com/)公共 API 更新；人数和在线状态不是实时数据，具体可用性及加入要求以服务器为准；服务器图标按需从 [MCStatus.io](https://mcstatus.io/) 获取。
-- 正版登录默认使用项目配置的微软应用 ID，终端玩家无需输入；构建时可通过环境变量 `CCL_MICROSOFT_CLIENT_ID` 覆盖。该应用需支持个人账户、启用公共客户端流程、将 `http://localhost` 注册为移动和桌面应用重定向 URI，并获 Minecraft 服务授权；未获授权的构建不能完成正版登录。参考 [微软桌面应用注册说明](https://learn.microsoft.com/en-us/azure/active-directory/develop/scenario-desktop-app-registration) 和 [Xbox 登录说明](https://learn.microsoft.com/en-us/xbox/gdk/docs/services/fundamentals/s2s-auth-calls/service-authentication/live-website-authentication)。
-- 模组和整合包搜索结果可在浏览器中打开来源项目页；模组版本选择中显示项目网址。
-- 在启动设置的界面外观中，可自定义主页横幅和全局背景图片，并调整透明度、磨砂强度和背景模糊；图片与设置保存在本设备。
-- 支持调整 Java 路径、游戏目录、最大内存，启用 G1GC，以及设置自定义 JVM 和游戏参数。启动日志保存在实例的 `logs/ccl` 目录，启动页可打开最近一次日志；进程异常退出时可打开对应日志。游戏内版本类型设置为 `CCL 0.1.4`；加载器显示的“已修改”等标识由加载器或游戏决定。
-- 自动使用系统代理，也可在启动设置中填写 HTTP、HTTPS 或 SOCKS5 代理地址。
+- **游戏与加载器**：安装 Minecraft Java 版正式版，可同时选择 Fabric、Quilt、Forge 或 NeoForge，以及兼容的常用模组。安装前抽样比较官方与 BMCLAPI 镜像线路，优先使用较快的线路，失败时尝试备用线路。
+- **Java 管理**：检测本机 Java，下载和管理 Eclipse Temurin Java 8、17、21 和 25，并校验下载文件。可用版本取决于发行商对当前平台的支持。
+- **模组与整合包**：浏览、搜索和排序 Modrinth 或 CurseForge 的内容，按页浏览结果并打开项目原站。模组按选定游戏版本和加载器过滤，可选择具体版本、自动安装必需依赖，也可启用、停用和删除已安装的模组。整合包使用独立实例目录。
+- **下载与版本管理**：最多同时执行三个任务，支持取消等待中或进行中的任务、重试和清理记录。版本可删除；默认保留存档、模组及共用资源，独立实例可选择连同实例数据一起删除。
+- **导入与导出**：导出模组、游戏与模组配置、资源包和启动参数，可选包含世界存档。导入时创建独立实例，并重新下载游戏与加载器。
+- **账户与外观**：支持离线玩家及微软正版账户；可预览皮肤和披风、上传正版皮肤并切换账户已有披风。主界面横幅和全局背景支持本地图片、透明度、磨砂与模糊调整。
+- **多人联机**：为游戏内开放的局域网端口创建 IPv6 转发，分享地址并检测 TCP 连接；也可以浏览每日更新的 [公开服务器目录](https://github.com/Zennho/ccl-server-catalog)。
+- **启动设置与日志**：配置游戏目录、Java 路径、内存、G1GC、自定义 JVM 和游戏参数及网络代理。启动日志保存在实例的 `logs/ccl` 目录，可从启动器打开。
 
-离线模式不能用于需要正版验证的服务器。游戏安装和 Java、模组下载均需要能够访问对应的发布服务。
+## 使用须知
 
-## 许可证
+- **正版登录**：CCL 已配置微软应用，玩家无需输入客户端 ID；但该应用仍需获得 Minecraft 服务授权，审核状态以官方回复为准。离线模式无法加入要求正版验证的服务器。登录令牌仅保存在运行时内存中，重启后需要重新登录。
+- **CurseForge**：浏览和下载需要自行提供 API Key；部分项目作者不允许第三方启动器下载文件。Modrinth 已安装项目通过文件哈希识别；CurseForge 通过 CCL 安装记录识别。
+- **联机与服务器**：跨网络连接需要双方有可互通的 IPv6，房主的路由器与防火墙允许入站 TCP。房间没有额外访问验证，请只向信任的人分享地址。公开服务器的在线状态和人数是每日快照，不代表实时状态。
+- **游戏数据**：默认游戏目录位于系统应用数据目录下的 `ccl/minecraft`，可在启动设置中修改。删除版本默认保留共用数据；选择删除独立实例数据时，实例内的存档和模组也会删除。导出包不包含日志、截图和账户信息。
+- **下载**：取消任务时会清理临时文件，已完成的共用游戏资源可以保留并在重新安装时复用。若整合包取消前已完成游戏本体或加载器安装，这些内容也会保留。任务记录仅在当前运行期间保存。
 
-CCL 使用 [MIT License](LICENSE) 发布。第三方组件的版权和许可说明见 [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt)。
+## 从源码开发
+
+### 环境准备
+
+安装 Node.js 22、Rust，以及 [Tauri 2 对应平台的系统依赖](https://v2.tauri.app/start/prerequisites/)。Linux 构建需要 WebKitGTK 等开发包，Windows 需要 Microsoft C++ 构建工具和 WebView2，macOS 需要 Xcode 命令行工具；以 Tauri 文档为准。
+
+```bash
+git clone https://github.com/Zennho/ccl.git
+cd ccl
+npm ci
+npm run tauri dev
+```
+
+常用命令：
+
+```bash
+npm test                                   # 界面及交互测试
+cargo test --manifest-path src-tauri/Cargo.toml --locked  # Rust 后端测试
+npm run build                              # 构建前端资源
+npm run tauri build                        # 构建当前平台的桌面安装包
+```
+
+桌面安装包通常需要在对应操作系统上构建。项目的 [发布工作流](.github/workflows/release.yml) 分别构建 Windows、Linux 和两种 macOS 架构，并在所有构建成功后发布。
+
+构建者可以通过 `CCL_MICROSOFT_CLIENT_ID` 环境变量覆盖默认微软应用 ID。自行注册的应用需要支持个人账户、启用公共客户端流程、将 `http://localhost` 注册为移动和桌面应用重定向 URI，并获得 Minecraft 服务授权；参考 [微软桌面应用注册文档](https://learn.microsoft.com/en-us/azure/active-directory/develop/scenario-desktop-app-registration)。
+
+## 项目结构
+
+```text
+src/                  界面、交互与样式
+src-tauri/src/        Tauri 命令、游戏安装、账户与其他后端功能
+tests/                界面交互测试
+.github/workflows/    跨平台构建与发布流程
+```
+
+## 参与贡献
+
+欢迎提交 [Issue](https://github.com/Zennho/ccl/issues) 或 Pull Request。报告问题时请提供系统、CCL 版本、复现步骤以及相关日志；提交代码前请运行适用的测试，并说明修改内容和验证方式。涉及账户、代理或日志时，请先移除密码、令牌和其他个人信息。
+
+## 许可证与声明
+
+本项目采用 [MIT License](LICENSE)，第三方组件许可见 [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt)。Minecraft、Mojang 和 Microsoft 是其各自所有者的商标；CCL 是独立项目，与 Mojang 或 Microsoft 没有隶属关系。
