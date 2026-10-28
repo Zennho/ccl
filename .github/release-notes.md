@@ -4,7 +4,9 @@ CCL 是支持 Windows、Linux 和 macOS 的 Minecraft Java 版启动器。
 - Linux x64：下载 `.deb` 或 `.AppImage`。
 - macOS：Apple Silicon 选择 `aarch64`，Intel 选择 `x64` 的 `.dmg`。
 
-新增公开 Java 服务器目录：可按名称、地址、版本或玩法搜索并复制地址，列表每天更新，在线状态与人数为快照。
+修复模组、整合包和服务器浏览中无法显示缩略图的问题。服务器图标由 MCStatus.io 按需提供。
+
+公开 Java 服务器目录：可按名称、地址、版本或玩法搜索并复制地址，列表每天更新，在线状态与人数为快照。
 
 支持游戏和 Java 安装、模组与整合包管理、IPv6 多人联机，以及账户和外观管理。
 

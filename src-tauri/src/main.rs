@@ -7,6 +7,7 @@ mod lan;
 mod lan_core;
 mod loaders;
 mod server_catalog;
+mod thumbnails;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -169,17 +170,20 @@ fn configure_proxy(proxy_url: String) -> ResultT<()> {
     Ok(())
 }
 fn http_client() -> ResultT<reqwest::Client> {
+    http_client_builder()?
+        .build()
+        .map_err(|e| format!("无法初始化网络请求: {e:#}"))
+}
+fn http_client_builder() -> ResultT<reqwest::ClientBuilder> {
     let proxy = MANUAL_PROXY.read().map_err(|_| "无法读取代理设置")?.clone();
     let mut builder = reqwest::Client::builder()
-        .user_agent("CCL/0.1.1")
+        .user_agent("CCL/0.1.2")
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(60));
     if let Some(proxy) = proxy {
         builder = builder.proxy(reqwest::Proxy::all(proxy).map_err(|_| "代理地址无效")?);
     }
-    builder
-        .build()
-        .map_err(|e| format!("无法初始化网络请求: {e:#}"))
+    Ok(builder)
 }
 fn network_error(error: reqwest::Error) -> String {
     use std::error::Error;
@@ -883,13 +887,13 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
                 "legacy".into()
             },
         ),
-        ("version_type", "CCL 0.1.1".into()),
+        ("version_type", "CCL 0.1.2".into()),
         (
             "natives_directory",
             base_dir.join("natives").to_string_lossy().to_string(),
         ),
         ("launcher_name", "CCL".into()),
-        ("launcher_version", "0.1.1".into()),
+        ("launcher_version", "0.1.2".into()),
         ("classpath", cp.join(sep)),
         ("classpath_separator", sep.into()),
         (
@@ -959,7 +963,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     use std::io::Write;
     writeln!(
         log,
-        "CCL 0.1.1 | 游戏版本 {} | 启动时间 {}",
+        "CCL 0.1.2 | 游戏版本 {} | 启动时间 {}",
         options.version, stamp
     )
     .map_err(|e| e.to_string())?;
@@ -1019,6 +1023,7 @@ fn main() {
             lan::stop_ipv6_room,
             lan::test_ipv6_connection,
             server_catalog::public_servers,
+            thumbnails::fetch_thumbnail,
             default_game_dir,
             configure_proxy,
             list_versions,

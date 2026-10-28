@@ -21,12 +21,23 @@ pub struct ContentHit {
     downloads: u64,
     source: String,
     installed: bool,
+    icon_url: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalMod {
     name: String,
     enabled: bool,
+}
+fn content_icon(value: &Value, source: &str) -> Option<String> {
+    if source == "modrinth" {
+        value["icon_url"].as_str()
+    } else {
+        value["logo"]["thumbnailUrl"]
+            .as_str()
+            .or_else(|| value["logo"]["url"].as_str())
+    }
+    .map(str::to_string)
 }
 
 fn valid_id(id: &str) -> ResultT<()> {
@@ -205,6 +216,7 @@ pub async fn search_content(
                 .unwrap_or(0),
                 installed: installed.contains_key(&id),
                 source: source.clone(),
+                icon_url: content_icon(v, &source),
             })
         })
         .collect();
@@ -1198,6 +1210,20 @@ pub async fn install_modpack(
 mod tests {
     use super::*;
     use std::io::{Cursor, Write};
+
+    #[test]
+    fn reads_thumbnail_urls_from_both_providers() {
+        assert_eq!(
+            content_icon(
+                &json!({"icon_url":"https://cdn.modrinth.com/icon.png"}),
+                "modrinth"
+            )
+            .as_deref(),
+            Some("https://cdn.modrinth.com/icon.png")
+        );
+        assert_eq!(content_icon(&json!({"logo":{"thumbnailUrl":"https://media.forgecdn.net/a.png","url":"https://media.forgecdn.net/b.png"}}), "curseforge").as_deref(), Some("https://media.forgecdn.net/a.png"));
+        assert_eq!(content_icon(&json!({"logo":null}), "curseforge"), None);
+    }
 
     fn archive(path: &str) -> Vec<u8> {
         let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
