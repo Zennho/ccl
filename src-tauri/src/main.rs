@@ -11,6 +11,7 @@ mod server_catalog;
 mod source_probe;
 mod thumbnails;
 mod version_manager;
+mod window_detect;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -64,6 +65,8 @@ struct LaunchOptions {
     game_args: String,
     #[serde(default)]
     account_mode: String,
+    #[serde(default)]
+    launch_id: Option<String>,
 }
 
 fn root(path: &str) -> ResultT<PathBuf> {
@@ -181,7 +184,7 @@ fn http_client() -> ResultT<reqwest::Client> {
 fn http_client_builder() -> ResultT<reqwest::ClientBuilder> {
     let proxy = MANUAL_PROXY.read().map_err(|_| "无法读取代理设置")?.clone();
     let mut builder = reqwest::Client::builder()
-        .user_agent("CCL/0.1.8")
+        .user_agent("CCL/0.1.9")
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(60));
     if let Some(proxy) = proxy {
@@ -789,11 +792,19 @@ fn parse_extra_args(input: &str) -> ResultT<Vec<String>> {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct GameExit {
+    launch_id: Option<String>,
     version: String,
     success: bool,
     code: Option<i32>,
     log_path: String,
     game_dir: String,
+}
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct GameWindowEvent {
+    launch_id: Option<String>,
+    version: String,
+    status: &'static str,
 }
 #[tauri::command]
 fn open_version_folder(game_dir: String, version: String) -> ResultT<()> {
@@ -957,13 +968,13 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
                 "legacy".into()
             },
         ),
-        ("version_type", "CCL 0.1.8".into()),
+        ("version_type", "CCL 0.1.9".into()),
         (
             "natives_directory",
             base_dir.join("natives").to_string_lossy().to_string(),
         ),
         ("launcher_name", "CCL".into()),
-        ("launcher_version", "0.1.8".into()),
+        ("launcher_version", "0.1.9".into()),
         ("classpath", cp.join(sep)),
         ("classpath_separator", sep.into()),
         (
@@ -1033,7 +1044,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     use std::io::Write;
     writeln!(
         log,
-        "CCL 0.1.8 | 游戏版本 {} | 启动时间 {}",
+        "CCL 0.1.9 | 游戏版本 {} | 启动时间 {}",
         options.version, stamp
     )
     .map_err(|e| e.to_string())?;
@@ -1051,9 +1062,55 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     let event_path = path_text.clone();
     let version = options.version;
     let game_dir = options.game_dir;
+    let launch_id = options.launch_id;
+    let pid = child.id();
     std::thread::spawn(move || {
         let _running_version = running_version;
-        let status = child.wait();
+        let start = std::time::Instant::now();
+        let mut monitor = window_detect::Monitor::default();
+        let status = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break Ok(status),
+                Err(error) => break Err(error),
+                Ok(None) => {}
+            }
+            if let Some(notice) = monitor.observe(window_detect::probe(pid), start.elapsed()) {
+                match notice {
+                    window_detect::Notice::Visible => {
+                        match child.try_wait() {
+                            Ok(Some(status)) => break Ok(status),
+                            Err(error) => break Err(error),
+                            Ok(None) => {}
+                        }
+                        let _ = app.emit(
+                            "game-window-ready",
+                            GameWindowEvent {
+                                launch_id: launch_id.clone(),
+                                version: version.clone(),
+                                status: "visible",
+                            },
+                        );
+                        break child.wait();
+                    }
+                    window_detect::Notice::Unavailable | window_detect::Notice::Slow => {
+                        let status = if notice == window_detect::Notice::Unavailable {
+                            "unavailable"
+                        } else {
+                            "slow"
+                        };
+                        let _ = app.emit(
+                            "game-window-status",
+                            GameWindowEvent {
+                                launch_id: launch_id.clone(),
+                                version: version.clone(),
+                                status,
+                            },
+                        );
+                    }
+                }
+            }
+            std::thread::sleep(Duration::from_millis(800));
+        };
         let (success, code) = match status {
             Ok(s) => (s.success(), s.code()),
             Err(_) => (false, None),
@@ -1064,6 +1121,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
         let _ = app.emit(
             "game-exit",
             GameExit {
+                launch_id,
                 version,
                 success,
                 code,

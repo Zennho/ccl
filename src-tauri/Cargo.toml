@@ -1,6 +1,6 @@
 [package]
 name = "ccl-launcher"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2021"
 
 [features]
@@ -32,3 +32,9 @@ socket2 = "0.6"
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = "0.13"
