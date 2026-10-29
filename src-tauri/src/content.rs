@@ -1,9 +1,9 @@
 use crate::{http_client, loaders, root, version_id, ResultT};
 use futures_util::{stream, StreamExt, TryStreamExt};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha1::Sha1;
-use sha2::{Digest, Sha512};
+use sha2::{Digest, Sha256, Sha512};
 use std::{
     collections::{HashMap, VecDeque},
     fs,
@@ -233,6 +233,334 @@ pub async fn curseforge_description(
     )?)
     .await?;
     Ok(data["data"].as_str().map(str::to_string))
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EncyclopediaMatch {
+    url: String,
+    name: String,
+    summary: String,
+}
+
+// Only accept an exact project URL match from the encyclopedia's related links.
+// Names alone are not enough: add-ons and forks often have very similar names.
+fn project_identity(url: &str, source: &str, kind: &str) -> Option<String> {
+    let url = reqwest::Url::parse(url).ok()?;
+    let host = url.host_str()?;
+    let parts: Vec<_> = url.path_segments()?.filter(|p| !p.is_empty()).collect();
+    let part = match (source, kind, host, parts.as_slice()) {
+        ("modrinth", "mod", "modrinth.com", ["mod" | "project", id]) => *id,
+        ("modrinth", "modpack", "modrinth.com", ["modpack" | "project", id]) => *id,
+        (
+            "curseforge",
+            "mod",
+            "www.curseforge.com" | "curseforge.com",
+            ["minecraft", "mc-mods", id],
+        ) => *id,
+        (
+            "curseforge",
+            "modpack",
+            "www.curseforge.com" | "curseforge.com",
+            ["minecraft", "modpacks", id],
+        ) => *id,
+        _ => return None,
+    };
+    if url.scheme() != "https" || valid_id(part).is_err() {
+        return None;
+    }
+    Some(part.to_string())
+}
+
+fn encyclopedia_id(url: &str, kind: &str) -> Option<String> {
+    let url = reqwest::Url::parse(url).ok()?;
+    if url.scheme() != "https" || url.host_str()? != "www.mcmod.cn" {
+        return None;
+    }
+    let parts: Vec<_> = url.path_segments()?.collect();
+    let section = if kind == "mod" {
+        "class"
+    } else if kind == "modpack" {
+        "modpack"
+    } else {
+        return None;
+    };
+    let [actual, file] = parts.as_slice() else {
+        return None;
+    };
+    let id = file.strip_suffix(".html")?;
+    if *actual != section
+        || id.is_empty()
+        || id.len() > 12
+        || !id.bytes().all(|b| b.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(id.to_string())
+}
+
+async fn limited_json(builder: reqwest::RequestBuilder) -> ResultT<Value> {
+    let mut response = builder
+        .timeout(Duration::from_secs(8))
+        .send()
+        .await
+        .map_err(|_| "内容服务连接失败")?
+        .error_for_status()
+        .map_err(|_| "内容服务不可用")?;
+    let mut body = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "内容服务读取失败")? {
+        if body.len() + chunk.len() > 4 * 1024 * 1024 {
+            return Err("内容数据过大".into());
+        }
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|_| "内容数据解析失败".into())
+}
+
+#[tauri::command]
+pub async fn lookup_mcmod(
+    source: String,
+    kind: String,
+    project_url: Option<String>,
+    title: String,
+) -> ResultT<Option<EncyclopediaMatch>> {
+    let Some(expected) = project_url
+        .as_deref()
+        .and_then(|url| project_identity(url, &source, &kind))
+    else {
+        return Ok(None);
+    };
+    if title.trim().is_empty() || title.len() > 240 {
+        return Ok(None);
+    }
+    let client = crate::http_client_builder()?
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "无法初始化网络请求")?;
+    let mut q = reqwest::Url::parse("https://example.invalid/").unwrap();
+    q.query_pairs_mut().append_pair("key", title.trim());
+    let url = format!("https://mcmod-api.zkitefly.eu.org/s/{}", q.query().unwrap());
+    let result = limited_json(client.get(url)).await?;
+    let candidates: Vec<(String, String, String)> = result
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            let id = encyclopedia_id(item["address"].as_str()?, &kind)?;
+            Some((
+                id,
+                item["data"]["chinese_name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .to_string(),
+                item["description"].as_str().unwrap_or("").to_string(),
+            ))
+        })
+        .take(5)
+        .collect();
+    let section = if kind == "mod" { "class" } else { "modpack" };
+    let mut checks = stream::iter(candidates.into_iter().map(|(id, name, summary)| {
+        let client = client.clone();
+        let expected = expected.clone();
+        let source = source.clone();
+        let kind = kind.clone();
+        async move {
+            let data = limited_json(client.get(format!(
+                "https://mcmod-api.zkitefly.eu.org/d/{section}/{id}"
+            )))
+            .await
+            .ok()?;
+            let matched = data["related_links"].as_array()?.iter().any(|link| {
+                link["url"]
+                    .as_str()
+                    .and_then(|url| project_identity(url, &source, &kind))
+                    .as_deref()
+                    == Some(&expected)
+            });
+            matched.then(|| EncyclopediaMatch {
+                url: format!("https://www.mcmod.cn/{section}/{id}.html"),
+                name,
+                summary: summary.chars().take(200).collect(),
+            })
+        }
+    }))
+    .buffered(3);
+    while let Some(result) = checks.next().await {
+        if result.is_some() {
+            return Ok(result);
+        }
+    }
+    Ok(None)
+}
+
+fn translation_hash(text: &str, field: &str, format: &str) -> String {
+    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+    let envelope = json!({"field":field,"format":format,"schema":"mc-text-v1","source_language":"und","text":text});
+    format!(
+        "sha256:{:x}",
+        Sha256::digest(serde_json::to_vec(&envelope).expect("valid JSON"))
+    )
+}
+
+fn ready_translation(detail: &Value, field: &str, hash: &str) -> Option<String> {
+    detail["fields"].as_array()?.iter().find_map(|item| {
+        if item["field"] != field
+            || item["state"] != "ready"
+            || item["is_current"] != true
+            || item["matches_request"] != true
+            || item["requested_source_hash"] != hash
+        {
+            return None;
+        }
+        let text = item["translation"]["text"].as_str()?;
+        if text.trim().is_empty() || text.len() > 2 * 1024 * 1024 {
+            return None;
+        }
+        Some(text.to_string())
+    })
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryToTranslate {
+    project_id: String,
+    summary: String,
+}
+
+#[tauri::command]
+pub async fn translate_content_summaries(
+    source: String,
+    items: Vec<SummaryToTranslate>,
+) -> ResultT<HashMap<String, String>> {
+    if !matches!(source.as_str(), "modrinth" | "curseforge") || items.len() > 50 {
+        return Err("无效的翻译请求".into());
+    }
+    let valid: Vec<_> = items
+        .into_iter()
+        .filter(|item| {
+            valid_id(&item.project_id).is_ok()
+                && !item.summary.trim().is_empty()
+                && item.summary.len() <= 4096
+        })
+        .map(|item| {
+            let hash = translation_hash(&item.summary, "summary", "plain");
+            (item.project_id, hash)
+        })
+        .collect();
+    if valid.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let request_items: Vec<Value> = valid.iter().map(|(id, hash)| json!({"request_id":id,"resource":{"provider":source,"project_id":id,"entity_type":"project","entity_id":id},"fields":[{"field":"summary","source_hash":hash}]})).collect();
+    let client = crate::http_client_builder()?
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "无法初始化网络请求")?;
+    let response = limited_json(client.post("https://translate.bugg.icu/v1/translations:resolve").json(&json!({"target_language":"zh-Hans","profile":"minecraft-v1","items":request_items}))).await?;
+    let mut translations = HashMap::new();
+    for result in response["results"].as_array().into_iter().flatten() {
+        let Some(id) = result["request_id"].as_str() else {
+            continue;
+        };
+        if let Some((_, hash)) = valid.iter().find(|(expected, _)| expected == id) {
+            if let Some(text) = ready_translation(result, "summary", hash) {
+                translations.insert(id.to_string(), text);
+            }
+        }
+    }
+    Ok(translations)
+}
+
+async fn translation_token(client: &reqwest::Client) -> ResultT<String> {
+    static TOKEN: OnceLock<tokio::sync::Mutex<Option<(String, Instant)>>> = OnceLock::new();
+    let mut token = TOKEN
+        .get_or_init(|| tokio::sync::Mutex::new(None))
+        .lock()
+        .await;
+    if let Some((value, expires)) = &*token {
+        if *expires > Instant::now() {
+            return Ok(value.clone());
+        }
+    }
+    let response = limited_json(
+        client
+            .post("https://translate.bugg.icu/v1/sessions/anonymous")
+            .json(&json!({"client_id":"compass-craft-launcher"})),
+    )
+    .await?;
+    let value = response["access_token"]
+        .as_str()
+        .filter(|s| !s.is_empty() && s.len() < 2048)
+        .ok_or("翻译服务暂不可用")?
+        .to_string();
+    let seconds = response["expires_in"]
+        .as_u64()
+        .unwrap_or(3600)
+        .min(3600)
+        .saturating_sub(60);
+    *token = Some((value.clone(), Instant::now() + Duration::from_secs(seconds)));
+    Ok(value)
+}
+
+#[tauri::command]
+pub async fn translate_content(
+    source: String,
+    project_id: String,
+    description: String,
+    summary: String,
+) -> ResultT<Option<String>> {
+    if !matches!(source.as_str(), "modrinth" | "curseforge") {
+        return Err("未知内容来源".into());
+    }
+    valid_id(&project_id)?;
+    let (field, format, text) = if !description.trim().is_empty() {
+        (
+            "body",
+            if source == "modrinth" {
+                "markdown"
+            } else {
+                "html"
+            },
+            description.as_str(),
+        )
+    } else {
+        ("summary", "plain", summary.as_str())
+    };
+    if text.trim().is_empty() || text.len() > 2 * 1024 * 1024 {
+        return Ok(None);
+    }
+    let hash = translation_hash(text, field, format);
+    let client = crate::http_client_builder()?
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .map_err(|_| "无法初始化网络请求")?;
+    let url = format!("https://translate.bugg.icu/v1/projects/{source}/{project_id}/detail?target_language=zh-Hans");
+    if let Ok(detail) = limited_json(client.get(&url)).await {
+        if let Some(text) = ready_translation(&detail, field, &hash) {
+            return Ok(Some(text));
+        }
+    }
+    let token = translation_token(&client).await?;
+    let payload = json!({"target_language":"zh-Hans","profile":"minecraft-v1","purpose":"detail","items":[{"request_id":"detail","resource":{"provider":source,"project_id":project_id,"entity_type":"project","entity_id":project_id},"fields":[{"field":field,"source_hash":hash}]}]});
+    let mut random = [0u8; 16];
+    getrandom::fill(&mut random).map_err(|_| "无法请求翻译")?;
+    let key: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+    limited_json(
+        client
+            .post("https://translate.bugg.icu/v1/translations:ensure")
+            .bearer_auth(token)
+            .header("Idempotency-Key", key)
+            .json(&payload),
+    )
+    .await?;
+    for _ in 0..5 {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        if let Ok(detail) = limited_json(client.get(&url)).await {
+            if let Some(text) = ready_translation(&detail, field, &hash) {
+                return Ok(Some(text));
+            }
+        }
+    }
+    Ok(None)
 }
 #[tauri::command]
 pub fn open_content_page(url: String) -> ResultT<()> {
@@ -3129,6 +3457,55 @@ mod tests {
             Some("https://modrinth.com/mod/AANobbMI")
         );
         assert!(public_link("http://127.0.0.1/private").is_none());
+    }
+
+    #[test]
+    fn encyclopedia_links_require_correct_project_and_page_types() {
+        assert_eq!(
+            project_identity("https://modrinth.com/mod/sodium", "modrinth", "mod").as_deref(),
+            Some("sodium")
+        );
+        assert_ne!(
+            project_identity("https://modrinth.com/mod/sodium-extra", "modrinth", "mod"),
+            project_identity("https://modrinth.com/mod/sodium", "modrinth", "mod")
+        );
+        assert!(project_identity(
+            "https://modrinth.com.evil.test/mod/sodium",
+            "modrinth",
+            "mod"
+        )
+        .is_none());
+        assert!(
+            project_identity("https://modrinth.com/modpack/sodium", "modrinth", "mod").is_none()
+        );
+        assert_eq!(
+            encyclopedia_id("https://www.mcmod.cn/class/2785.html", "mod").as_deref(),
+            Some("2785")
+        );
+        assert!(encyclopedia_id("https://www.mcmod.cn/class/2785.html", "modpack").is_none());
+        assert!(encyclopedia_id("https://www.mcmod.cn/class/../other.html", "mod").is_none());
+    }
+
+    #[test]
+    fn translation_requires_matching_current_source_hash() {
+        let original = "A high-performance rendering engine replacement for Minecraft, which greatly improves frame rates and reduces micro-stutter.";
+        let hash = translation_hash(original, "summary", "plain");
+        assert_eq!(
+            hash,
+            "sha256:91c1b6a928531a3e4cab674ac0d170687fcaa822f85fa1c5ed6c2b13c7993fb7"
+        );
+        let mut response = json!({"fields":[{"field":"summary","state":"ready","is_current":true,"matches_request":true,"requested_source_hash":hash,"translation":{"text":"中文译文"}}]});
+        assert_eq!(
+            ready_translation(&response, "summary", &hash).as_deref(),
+            Some("中文译文")
+        );
+        assert!(ready_translation(&response, "summary", "sha256:outdated").is_none());
+        response["fields"][0]["is_current"] = json!(false);
+        assert!(ready_translation(&response, "summary", &hash).is_none());
+        assert_eq!(
+            translation_hash("你好\r\n世界", "body", "markdown"),
+            translation_hash("你好\n世界", "body", "markdown")
+        );
     }
 
     #[test]

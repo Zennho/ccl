@@ -21,8 +21,12 @@ function boot(options={}){
   if(name==='shader_environment')return Promise.resolve(options.shaderEnv||{loader:'vanilla',detected:[],uncertain:false});
   if(name==='check_pack_updates')return Promise.resolve(options.packUpdates||{checked:0,unknown:0,failed:0,updates:[]});
   if(name==='remove_local_pack'){options.packs=(options.packs||[]).filter(p=>p.name!==args.name);return Promise.resolve();}
-  if(name==='search_content')return Promise.resolve({hits:[{id:'project1',title:'示例项目',description:'简介',installed:false},{id:'project2',title:'已安装项目',description:'简介',installed:true}],hasMore:!!options.hasMore});
-  if(name==='content_links')return Promise.resolve({links:[],description:'详情'});
+  if(name==='search_content')return Promise.resolve({hits:options.hits||[{id:'project1',title:'示例项目',description:'简介',installed:false},{id:'project2',title:'已安装项目',description:'简介',installed:true}],hasMore:!!options.hasMore});
+  if(name==='content_links')return Promise.resolve({links:[],description:options.description||'详情'});
+  if(name==='translate_content')return options.translate?options.translate(args):Promise.resolve(null);
+  if(name==='translate_content_summaries')return options.translateSummaries?options.translateSummaries(args):Promise.resolve({});
+  if(name==='lookup_mcmod')return options.lookup?options.lookup(args):Promise.resolve(null);
+  if(name==='list_mod_versions')return Promise.resolve([]);
   if(name==='curseforge_description')return Promise.resolve('详情');
   if(name==='list_pack_versions')return Promise.resolve([{id:'pack1',name:'第一版',number:'1',date:'2025-01-01'},{id:'pack2',name:'第二版',number:'2',date:'2025-02-01'}]);
   if(name==='install_pack')return new Promise((resolve,reject)=>pending.push({resolve,reject,args}));
@@ -36,6 +40,41 @@ function boot(options={}){
  const change=(selector,value)=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.value=value;el.dispatchEvent(new w.Event('change',{bubbles:true}));};
  return {w,calls,pending,click,change,close:()=>w.close()};
 }
+
+test('shows a verified encyclopedia page and toggles between translated and original descriptions',async()=>{
+ const app=boot({hits:[{id:'AANobbMI',title:'Sodium',description:'Original summary',projectUrl:'https://modrinth.com/mod/sodium'}],description:'Original description',lookup:()=>Promise.resolve({url:'https://www.mcmod.cn/class/2785.html',summary:'中文摘要'}),translate:()=>Promise.resolve('中文翻译'),translateSummaries:()=>Promise.resolve({AANobbMI:'中文列表简介'})});
+ try{
+  await tick();app.click('[data-page=content]');await tick();assert.match(app.w.document.querySelector('[data-content-summary="0"]').textContent,/中文列表简介/);app.click('[data-content-details="0"]');await tick();await tick();
+  assert.match(app.w.document.querySelector('.project-description').textContent,/中文翻译/);
+  assert.match(app.w.document.querySelector('.project-description').textContent,/AI 翻译/);
+  assert.ok(app.w.document.querySelector('[data-open-project="https://www.mcmod.cn/class/2785.html"]'));
+  assert.ok(!app.w.document.querySelector('[data-open-project^="https://search.mcmod.cn"]'));
+  app.click('[data-action=toggle-content-language]');assert.match(app.w.document.querySelector('.project-description').textContent,/Original description/);
+  app.click('[data-action=toggle-content-language]');assert.match(app.w.document.querySelector('.project-description').textContent,/中文翻译/);
+ }finally{app.close();}
+});
+
+test('keeps original text and encyclopedia search when services fail',async()=>{
+ const app=boot({hits:[{id:'project1',title:'Unknown',description:'Original summary',projectUrl:'https://modrinth.com/mod/unknown'}],description:'Original description',lookup:()=>Promise.reject('offline'),translate:()=>Promise.reject('offline')});
+ try{
+  await tick();app.click('[data-page=content]');await tick();app.click('[data-content-details="0"]');await tick();await tick();
+  assert.match(app.w.document.querySelector('.project-description').textContent,/Original description/);
+  assert.ok(app.w.document.querySelector('[data-open-project^="https://search.mcmod.cn"]'));
+  assert.ok(!app.w.document.querySelector('[data-action=toggle-content-language]'));
+ }finally{app.close();}
+});
+
+test('ignores late translations and encyclopedia results after switching projects',async()=>{
+ let resolveTranslation,resolveLookup;
+ const app=boot({hits:[{id:'first',title:'First',description:'First summary',projectUrl:'https://modrinth.com/mod/first'},{id:'second',title:'Second',description:'Second summary',projectUrl:'https://modrinth.com/mod/second'}],translate:({projectId})=>projectId==='first'?new Promise(resolve=>{resolveTranslation=resolve;}):Promise.resolve('第二个译文'),lookup:({title})=>title==='First'?new Promise(resolve=>{resolveLookup=resolve;}):Promise.resolve(null)});
+ try{
+  await tick();app.click('[data-page=content]');await tick();app.click('[data-content-details="0"]');await tick();
+  app.click('[data-action=close-mod-dialog]');app.click('[data-content-details="1"]');await tick();
+  resolveTranslation('过期译文');resolveLookup({url:'https://www.mcmod.cn/class/1.html',summary:'过期摘要'});await tick();
+  assert.match(app.w.document.querySelector('.project-description').textContent,/第二个译文/);
+  assert.ok(!app.w.document.querySelector('[data-open-project="https://www.mcmod.cn/class/1.html"]'));
+ }finally{app.close();}
+});
 
 test('downloads selected resource pack version to the chosen vanilla game and can cancel',async()=>{
  const app=boot();try {
