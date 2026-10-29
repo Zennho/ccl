@@ -15,5 +15,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'pages.tsx',['Icon','HomePage','VersionsPage','JavaPage']);
  load(window,'instance-settings.tsx',['InstanceSettingsDialog']);
  load(window,'lan-room.tsx',['LanRoomPage']);
+ load(window,'public-servers.tsx',['PublicServersPage']);
+ load(window,'instance-overview.tsx',['InstanceOverviewDialog']);
  load(window,'instance-settings-model.ts',['normalizeInstanceSettings','resolveInstanceSettings']);
 };

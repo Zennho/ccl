@@ -40,9 +40,9 @@ export function createRenderer(container: HTMLElement) {
       if (!content || !overlay) throw new Error('React shell is missing its render targets');
       pageRoot = createRoot(content); overlayRoot = createRoot(overlay);
     },
-    page(html: string, component: AnyComponent | null = null, props: object = {}) {
+    page(html: string, component: AnyComponent | null = null, props: object = {}, stableKey?: string) {
       if (!pageRoot) throw new Error('React shell is not mounted');
-      flushSync(() => pageRoot!.render(<Page html={html} component={component} props={props} key={++revision} />));
+      flushSync(() => pageRoot!.render(<Page html={html} component={component} props={props} key={stableKey ?? ++revision} />));
     },
     overlay(html: string, component: AnyComponent | null = null, props: object = {}) {
       if (!overlayRoot) throw new Error('React shell is not mounted');

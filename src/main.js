@@ -10,6 +10,8 @@ import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
 import { LanRoomPage } from './react/lan-room.tsx';
+import { PublicServersPage } from './react/public-servers.tsx';
+import { InstanceOverviewDialog } from './react/instance-overview.tsx';
 import { normalizeInstanceSettings, resolveInstanceSettings } from './react/instance-settings-model.ts';
 import { version as appVersion } from '../package.json';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
@@ -287,9 +289,6 @@ function shell() {
   <main class="main"><header class="topbar"><div class="breadcrumbs"><strong>${{home:'启动游戏',versions:'版本管理',content:'模组与资源',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'}[state.page]}</strong></div><div class="top-right"><div id="update-slot" aria-live="polite"></div><div class="avatar">${esc(playerName().slice(0,1).toUpperCase())}</div><div class="profile"><strong>${esc(playerName())}</strong><small>${playerStatus()}</small></div></div></header>
   <div class="content"></div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
 }
-function multiplayerPage() {
- return `<div class="server-tabs" role="tablist" aria-label="联机功能"><button type="button" data-lan-view="room" role="tab" aria-selected="${state.lanView==='room'}">IPv6 房间</button><button type="button" data-lan-view="servers" role="tab" aria-selected="${state.lanView==='servers'}">公开服务器</button></div>${publicServersPage()}`;
-}
 async function refreshLanAddresses() {
  try { state.lanAddresses=await invoke('ipv6_addresses'); if(state.page==='multiplayer') render(); }
  catch(e) { flash(`读取 IPv6 地址失败：${e}`,'error'); }
@@ -302,16 +301,6 @@ function filteredServers() {
  const query=state.serverQuery.trim().toLowerCase();
  const list=Array.isArray(state.serverCatalog?.servers)?state.serverCatalog.servers:[];
  return list.filter(s=>s && typeof s.address==='string' && (!query || [s.name,s.address,s.version,s.description,...(Array.isArray(s.tags)?s.tags:[])].some(x=>String(x||'').toLowerCase().includes(query))) && (state.serverStatus==='all' || s.status===state.serverStatus));
-}
-function publicServersPage() {
- const list=filteredServers(), size=40, allServers=Array.isArray(state.serverCatalog?.servers)?state.serverCatalog.servers:[], sources=Array.isArray(state.serverCatalog?.sources)?state.serverCatalog.sources:[], maxPage=Math.max(0,Math.ceil(list.length/size)-1), page=Math.min(state.serverPage,maxPage);
- const rawDate=state.serverCatalog?.updatedAt, date=rawDate && !Number.isNaN(Date.parse(rawDate)) ? new Date(rawDate).toLocaleString() : '尚未获取';
- const rows=list.slice(page*size,(page+1)*size);
- return `<div class="page-heading inner-heading"><div><h1>公开服务器</h1><p>浏览 Minecraft Java 版社区服务器，复制地址后在游戏中加入。</p></div><button class="outline-btn" data-action="refresh-public-servers" ${state.serverLoading?'disabled':''}>${icon('refresh-cw',16)} ${state.serverLoading?'获取中':'刷新目录'}</button></div>
- <div class="server-summary"><div><span class="section-index">PUBLIC SERVERS / DAILY SNAPSHOT</span><strong>${state.serverCatalog?`${list.length} / ${allServers.length} 个服务器`:'服务器目录'}</strong><p>目录更新：${esc(date)}${state.serverCatalog?.truncated?' · 部分来源已截取':''}</p></div><span>状态与人数为每日快照，可能已经变化</span></div><div class="server-sources"><strong>数据来源</strong>${sources.length?sources.map(source=>`<button class="text-link" data-open-project="${esc(source.url)}" title="${esc(source.status==='ok'?'本次已更新':source.status==='stale'?'使用上次快照':'暂不可用')}">${esc(source.name)}${source.status==='stale'?' · 旧快照':source.status==='unavailable'?' · 不可用':''}</button>`).join(''):'<span>Minecraft Java Servers</span>'}</div>
- <div class="server-toolbar"><label class="server-search"><span class="sr-only">搜索服务器</span><input id="server-search" type="search" placeholder="搜索名称、地址、版本或玩法" value="${esc(state.serverQuery)}"></label><label><span class="sr-only">筛选状态</span><select id="server-status"><option value="all" ${state.serverStatus==='all'?'selected':''}>全部状态</option><option value="online" ${state.serverStatus==='online'?'selected':''}>快照在线</option><option value="offline" ${state.serverStatus==='offline'?'selected':''}>快照离线</option></select></label></div>
- ${state.serverError?`<div class="server-warning">目录加载失败：${esc(state.serverError)}${state.serverCatalog?'；当前显示的是上次获取的目录。':''}</div>`:''}<div class="server-list">${rows.length?rows.map((s,i)=>`<article class="server-row">${thumbnail('server',s.address,'globe-2','server-symbol')}<div class="server-details"><div class="server-name"><strong>${esc(s.name||s.address)}</strong><span class="server-state ${s.status==='online'?'online':''}">${s.status==='online'?'快照在线':s.status==='offline'?'快照离线':'状态未知'}</span></div><p>${esc(s.description||'暂无简介')}</p><div class="server-meta"><code>${esc(s.address)}</code><span>${esc(s.version||'版本未知')}</span>${Array.isArray(s.tags)?s.tags.slice(0,3).map(t=>`<span>${esc(t)}</span>`).join(''):''}${s.requiresMods===true?'<span>需要模组</span>':''}${Array.isArray(s.sourceIds)&&s.sourceIds.length?`<span>来源：${esc(s.sourceIds.map(id=>sources.find(source=>source.id===id)?.name||'').filter(Boolean).join('、'))}</span>`:''}</div></div><div class="server-players">${Number.isInteger(s.playersOnline)?esc(s.playersOnline):'—'}<small> / ${Number.isInteger(s.playersMax)?esc(s.playersMax):'—'}</small><span>快照人数</span></div><button class="row-button" data-server-copy="${page*size+i}">复制地址</button></article>`).join(''):`<div class="empty-state">${icon('globe-2',27)}<strong>${state.serverLoading?'正在获取服务器目录…':state.serverCatalog?'没有匹配的服务器':'暂未获取服务器目录'}</strong><p>${state.serverCatalog?'试试其他关键词或状态。':'可点击刷新重试。'}</p></div>`}</div>
- <div class="server-pagination-slot">${maxPage?`<div class="server-pagination"><span>第 ${page+1} / ${maxPage+1} 页 <label class="server-page-jump">前往 <input id="server-page-jump" type="number" min="1" max="${maxPage+1}" value="${page+1}" aria-label="跳转到服务器列表页"> 页</label></span><div><button class="outline-btn" data-server-page="${page-1}" ${page===0?'disabled':''}>上一页</button><button class="outline-btn" data-server-page="${page+1}" ${page===maxPage?'disabled':''}>下一页</button></div></div>`:''}</div><p class="lan-network-note">服务器由第三方运营，CCL 不保证其安全性或可用性。加入前请核对版本、模组及服务器规则；正版服务器需要正版账户。</p>`;
 }
 async function refreshPublicServers() {
  if(state.serverLoading) return;
@@ -559,14 +548,6 @@ function archiveDialog() {
  const m=d.manifest;
  return `<div class="install-overlay" data-action="close-archive-backdrop"><section class="install-dialog archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-title"><div class="install-dialog-head"><div><span class="section-index">IMPORT / GAME INSTANCE</span><h2 id="archive-title">导入 <em>${esc(m.name)}</em></h2><p>创建独立游戏目录，不覆盖已有版本。</p></div><button class="icon-button" data-action="close-archive" aria-label="关闭">${icon('x',19)}</button></div><div class="archive-details"><div class="archive-summary"><div><small>游戏版本</small><strong>${esc(m.gameVersion)}</strong></div><div><small>加载器</small><strong>${esc(m.loader==='vanilla'?'原版':m.loader)} ${esc(m.loaderVersion || '')}</strong></div><div><small>世界存档</small><strong>${m.includeSaves?'包含':'不包含'}</strong></div></div><p>${m.format==='modrinth'?'将导入 PCL 兼容的 Modrinth 整合包；清单中的文件可能需要联网下载，可选客户端文件将一并安装。':'导入时会联网获取游戏本体和加载器；模组及配置来自导出包。'} Forge 系列需要可用的 Java。</p>${m.launchSettings?`<label class="archive-check"><input type="checkbox" id="archive-settings"><span><strong>同时导入启动参数</strong><small>将覆盖启动器当前的内存、优化和自定义参数设置。</small></span></label>`:''}</div><div class="install-actions"><button class="outline-btn" data-action="close-archive">取消</button><button class="save-button" data-action="confirm-import">加入导入任务 ${icon('chevron-right',16)}</button></div></section></div>`;
 }
-function instanceDialog() {
- const view=state.instanceView;if(!view)return '';
- const info=view.info;
- const size=n=>n>=1073741824?`${(n/1073741824).toFixed(2)} GB`:`${(n/1048576).toFixed(1)} MB`;
- const date=info?.lastLaunched?new Date(info.lastLaunched*1000).toLocaleString():'暂无启动记录';
- return `<div class="install-overlay"><section class="install-dialog instance-dialog" role="dialog" aria-modal="true" aria-labelledby="instance-title"><div class="install-dialog-head"><div><span class="section-index">GAME / INSTANCE</span><h2 id="instance-title">${esc(view.name)}</h2><p>查看此版本的游戏目录与资源情况。</p></div><button class="icon-button" data-action="close-instance" aria-label="关闭">${icon('x',19)}</button></div>${view.loading?'<div class="empty-state">正在统计实例文件…</div>':view.error?`<div class="empty-state">读取失败：${esc(view.error)}</div>`:info?`<div class="instance-grid"><div><small>游戏版本</small><strong>${esc(info.gameVersion)}</strong></div><div><small>加载器</small><strong>${esc(info.loader==='vanilla'?'原版':info.loader)}</strong></div><div><small>游戏目录</small><strong>${info.isolated?'独立':'共用'}</strong></div><div><small>模组文件</small><strong>${esc(info.mods)}</strong></div><div><small>材质包</small><strong>${esc(info.resourcePacks)}</strong></div><div><small>光影包</small><strong>${esc(info.shaderPacks)}</strong></div><div><small>目录占用${info.sizeIncomplete?' · 不完整':''}</small><strong>${esc(size(info.sizeBytes))}</strong></div><div><small>最近启动</small><strong>${esc(date)}</strong></div></div><p class="instance-note">${info.isolated?'统计独立游戏目录；共享的游戏本体和库文件不计入。':'统计共用游戏目录，其他未隔离的版本也会使用这些数据。'}${info.sizeIncomplete?' 部分文件无法读取或为符号链接，结果可能偏小。':''}</p>`:''}<div class="install-actions"><button class="outline-btn" data-action="close-instance">关闭</button><button class="save-button" data-open-version-folder="${esc(view.version)}">打开游戏目录</button></div></section></div>`;
-}
-
 function diagnosticContent(crash) {
  const d=crash?.diagnosis;
  const title=typeof d?.title==='string'?d.title:'暂未识别出明确原因';
@@ -681,7 +662,9 @@ function renderOverlay() {
  } else if(state.instanceSettingsView && !state.launchView && !state.crashDialog) {
   const d=state.instanceSettingsView,savedSettings=getLaunchSettings(d.gameDir,d.version);
   renderer.overlay('',InstanceSettingsDialog,{name:d.name,values:{...state,...savedSettings},saved:savedSettings,runtimes:Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]});
- } else renderer.overlay(state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.instanceView ? instanceDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '');
+ } else if(state.instanceView && !state.launchView && !state.crashDialog && !state.themeView && !state.profileView && !state.manageView) {
+  renderer.overlay('',InstanceOverviewDialog,{view:state.instanceView});
+ } else renderer.overlay(state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '');
  syncMemoryControls();
  if(state.profileView)paintProfileImages(state.profileView);
  hydrateIcons();
@@ -691,7 +674,8 @@ function renderPage() {
  if(state.page==='versions' && !state.versionDelete){renderer.page('',VersionsPage,{versions:state.versions,query:state.versionQuery,selected:state.selected,loading:state.loading,versionIcon});return;}
  if(state.page==='java'){renderer.page('',JavaPage,{runtimes:state.javaRuntimes,javaPath:state.javaPath,loading:state.javaLoading,deleteIndex:state.javaDelete,hasJob});return;}
  if(state.page==='multiplayer' && state.lanView==='room'){renderer.page('',LanRoomPage,{room:state.lanRoom,busy:state.lanBusy,addresses:state.lanAddresses,port:state.lanPort,target:state.lanTarget,test:state.lanTest});return;}
- renderer.page(state.page === 'versions' ? versionsPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage());
+ if(state.page==='multiplayer' && state.lanView==='servers'){renderServerPage();return;}
+ renderer.page(state.page === 'versions' ? versionsPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : settingsPage());
 }
 function render() {
  if(composingSearch && renderedPage===state.page) { pendingCompositionRender=true;return; }
@@ -715,11 +699,14 @@ function render() {
  }
  renderedPage = state.page; syncMemoryControls(); applyTheme(); renderChrome(); if(!(state.modDraft && app.querySelector("#modal-root .mod-dialog")) && !(state.archiveDraft && app.querySelector("#modal-root .archive-dialog"))) renderOverlay(); hydrateIcons(); hydrateThumbnails(); refreshPreview();
 }
+function renderServerPage() {
+ renderer.page('',PublicServersPage,{catalog:state.serverCatalog,filtered:filteredServers(),query:state.serverQuery,status:state.serverStatus,page:state.serverPage,loading:state.serverLoading,error:state.serverError},'public-servers');
+}
 function updateSearchResults(kind) {
+ if(kind==='server') {renderServerPage();hydrateThumbnails();return;}
  const content=app.querySelector('.content');if(!content)return;
- const preview=document.createElement('div');preview.innerHTML=kind==='server'?publicServersPage():versionsPage();
- const selectors=kind==='server'?['.server-summary','.server-list','.server-pagination-slot']:['.version-list','.version-toolbar .count'];
- for(const selector of selectors) { const old=content.querySelector(selector),next=preview.querySelector(selector);if(old&&next) old.replaceWith(next); }
+ const preview=document.createElement('div');preview.innerHTML=versionsPage();
+ for(const selector of ['.version-list','.version-toolbar .count']) { const old=content.querySelector(selector),next=preview.querySelector(selector);if(old&&next) old.replaceWith(next); }
  hydrateIcons();hydrateThumbnails();
 }
 async function refresh() {
