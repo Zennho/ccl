@@ -738,6 +738,15 @@ async fn session() -> ResultT<Session> {
     Ok(new)
 }
 pub async fn launch_identity() -> ResultT<LaunchIdentity> {
+    // The launcher UI can retain the online selection while the in-memory
+    // session is absent (for example after a restart). Never fall back to
+    // offline identity: try the saved credential before starting the game.
+    let needs_restore = { state().lock().await.session.is_none() };
+    if needs_restore {
+        restore_microsoft_account()
+            .await?
+            .ok_or("未找到已保存的正版账户，请先登录微软账户")?;
+    }
     let s = session().await?;
     Ok(LaunchIdentity {
         name: s.name,

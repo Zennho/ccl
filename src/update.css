@@ -1,0 +1,6 @@
+.update-pill{display:flex;align-items:center;gap:2px;padding:3px 5px 3px 9px;border:1px solid #c4d9b9;border-radius:18px;background:rgba(229,242,222,.88);box-shadow:0 3px 12px #68815b12}
+.update-pill button{display:flex;align-items:center;gap:6px;border:0;background:transparent;color:#52734c;font-size:11px;font-weight:700;padding:5px;white-space:nowrap}
+.update-pill button:hover{color:#304c2e}.update-pill button:last-child{color:#81947b;padding:5px;border-radius:50%}.update-pill button:last-child:hover{background:#cfdfc8}
+.update-settings-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin-top:18px;flex-wrap:wrap}
+.update-settings-row p{margin:0;color:#778c70;font-size:12px;line-height:1.6;overflow-wrap:anywhere}.update-settings-row>div{display:flex;align-items:center;gap:8px}.update-settings-row .save-button{padding:10px 15px}
+@media(max-width:1050px){.update-pill button span{max-width:90px;overflow:hidden;text-overflow:ellipsis}}

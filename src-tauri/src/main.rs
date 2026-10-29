@@ -11,6 +11,7 @@ mod loaders;
 mod server_catalog;
 mod source_probe;
 mod thumbnails;
+mod update;
 mod version_manager;
 mod window_detect;
 use futures_util::{stream, StreamExt, TryStreamExt};
@@ -1155,6 +1156,8 @@ fn main() {
             lan::stop_ipv6_room,
             lan::test_ipv6_connection,
             server_catalog::public_servers,
+            update::check_launcher_update,
+            update::open_launcher_releases,
             thumbnails::fetch_thumbnail,
             jobs::begin_job,
             jobs::cancel_job,

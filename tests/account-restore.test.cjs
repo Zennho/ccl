@@ -6,12 +6,12 @@ const { JSDOM } = require('jsdom');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot({preference='microsoft', known=false, restore, logout} = {}) {
+function boot({preference='microsoft', known=false, restore, logout, launch} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w = dom.window;
   const calls = [];
   w.localStorage.setItem('ccl-settings', JSON.stringify({accountMode:preference,accountKnown:known,selected:installed.id,gameDir:'/game'}));
-  w.__icons = {}; w.createIcons = () => {}; w.isTauri = () => true;
+  w.setInterval=()=>0; w.__icons = {}; w.createIcons = () => {}; w.isTauri = () => true;
   w.getCurrentWindow = () => ({}); w.listen = async () => () => {};
   w.openDialog = async () => null; w.saveDialog = async () => null;
   w.invoke = async (name,args={}) => {
@@ -20,6 +20,7 @@ function boot({preference='microsoft', known=false, restore, logout} = {}) {
     if(name==='list_versions'||name==='installed_versions')return [installed];
     if(name==='restore_microsoft_account')return restore ? restore() : null;
     if(name==='logout_microsoft')return logout ? logout() : undefined;
+    if(name==='launch_game')return launch ? launch(args) : undefined;
     if(name==='get_appearance')return {skin:null,model:'classic',capes:[]};
   };
   w.appVersion = require('../package.json').version;
@@ -30,18 +31,21 @@ function boot({preference='microsoft', known=false, restore, logout} = {}) {
   return {w, calls, click, close:()=>w.close()};
 }
 
-test('restores the saved account before enabling online launch', async () => {
+test('online launch shares the background restore and waits before starting', async () => {
   let complete;
-  const app=boot({restore:()=>new Promise(resolve=>{complete=resolve;})});
+  const app=boot({known:true,restore:()=>new Promise(resolve=>{complete=resolve;})});
   try {
     await tick();
     const button=app.w.document.querySelector('[data-action="launch"]');
-    assert.ok(button.disabled);assert.match(button.textContent,/恢复登录/);
+    assert.equal(button.disabled,false,'home can be used while login is pending');
+    assert.match(app.w.document.querySelector('.profile small').textContent,/验证正版账户/);
+    app.click('[data-action="launch"]');await tick();
+    assert.match(app.w.document.querySelector('.launch-screen-copy').textContent,/正在验证正版账户/);
+    assert.equal(app.calls.filter(c=>c.name==='restore_microsoft_account').length,1,'uses the pending restoration');
+    assert.ok(!app.calls.some(c=>c.name==='launch_game'),'does not launch while unverified');
     complete({name:'RealPlayer',uuid:'abc',remembered:true});
     await tick();await tick();
     assert.equal(app.w.document.querySelector('.profile strong').textContent,'RealPlayer');
-    assert.equal(app.w.document.querySelector('[data-action="launch"]').disabled,false);
-    app.click('[data-action="launch"]');await tick();
     assert.equal(app.calls.findLast(c=>c.name==='launch_game').args.options.accountMode,'microsoft');
     const settings=app.w.localStorage.getItem('ccl-settings');
     assert.equal(JSON.parse(settings).accountMode,'microsoft');
@@ -49,51 +53,110 @@ test('restores the saved account before enabling online launch', async () => {
   } finally {app.close();}
 });
 
-test('preserves the offline choice when an account is restored', async () => {
-  const app=boot({preference:'offline',restore:()=>Promise.resolve({name:'RealPlayer',uuid:'abc',remembered:true})});
+test('offline mode does not restore on startup or block an offline launch', async () => {
+  const app=boot({preference:'offline',known:true,restore:()=>Promise.resolve({name:'RealPlayer',uuid:'abc',remembered:true})});
   try {
     await tick();await tick();
+    assert.ok(!app.calls.some(c=>c.name==='restore_microsoft_account'));
     assert.equal(app.w.document.querySelector('.profile strong').textContent,'Player');
-    app.click('[data-page="account"]');await tick();
-    assert.ok(app.w.document.querySelector('[data-action="use-microsoft"]'));
-    app.click('[data-action="use-microsoft"]');
+    app.click('[data-action="launch"]');await tick();
+    assert.equal(app.calls.findLast(c=>c.name==='launch_game').args.options.accountMode,'offline');
+    app.click('[data-action="close-launch-view"]');app.click('[data-page="account"]');await tick();
+    app.click('[data-action="use-microsoft"]');await tick();await tick();
+    assert.equal(app.calls.filter(c=>c.name==='restore_microsoft_account').length,1);
+    assert.equal(app.w.document.querySelector('.profile strong').textContent,'RealPlayer');
     assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-settings')).accountMode,'microsoft');
   } finally {app.close();}
 });
 
-test('reports restore and deletion errors without leaving the UI stuck', async () => {
-  let shouldFail=true;
-  const app=boot({known:true,restore:()=>shouldFail?Promise.reject('凭据库已锁定'):Promise.resolve({name:'RealPlayer',uuid:'abc',remembered:true}),logout:()=>Promise.reject('已退出本次会话，但无法删除保存的账户')});
+test('a failed background restore is retried on online launch', async () => {
+  let attempts=0;
+  const app=boot({known:true,restore:()=>++attempts===1?Promise.reject('网络暂不可用'):Promise.resolve({name:'RealPlayer',uuid:'abc',remembered:true})});
   try {
-    await tick();await tick();app.click('[data-page="account"]');
-    assert.match(app.w.document.querySelector('.identity-card').textContent,/凭据库已锁定/);app.click('[data-page="home"]');assert.ok(app.w.document.querySelector('[data-action="launch"]').disabled,'failed online restoration cannot silently launch offline');app.click('[data-page="account"]');
-    shouldFail=false;app.click('[data-action="retry-account-restore"]');await tick();await tick();
-    assert.ok(app.w.document.querySelector('[data-action="logout-microsoft"]'));
-    app.click('[data-action="logout-microsoft"]');await tick();
+    await tick();await tick();assert.equal(attempts,1);
+    assert.equal(app.w.document.querySelector('[data-action="launch"]').disabled,false);
+    app.click('[data-action="launch"]');await tick();await tick();
+    assert.equal(attempts,2);
+    assert.equal(app.calls.findLast(c=>c.name==='launch_game').args.options.accountMode,'microsoft');
+  } finally {app.close();}
+});
+
+test('failed online authentication never silently falls back to offline mode', async () => {
+  const app=boot({known:true,restore:()=>Promise.reject('凭据库已锁定')});
+  try {
+    await tick();await tick();app.click('[data-action="launch"]');await tick();await tick();
+    assert.match(app.w.document.querySelector('.launch-screen-copy').textContent,/凭据库已锁定/);
+    assert.ok(!app.calls.some(c=>c.name==='launch_game'));
+    app.click('[data-action="launch-account"]');
+    assert.match(app.w.document.querySelector('.identity-card').textContent,/凭据库已锁定/);
+    app.click('[data-action="continue-offline"]');
+    assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-settings')).accountMode,'offline');
+    app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+    assert.equal(app.calls.findLast(c=>c.name==='launch_game').args.options.accountMode,'offline');
+  } finally {app.close();}
+});
+
+test('missing credentials offer re-login instead of starting offline', async () => {
+  const app=boot({known:true,restore:()=>Promise.resolve(null)});
+  try {
+    await tick();await tick();app.click('[data-action="launch"]');await tick();await tick();
+    assert.match(app.w.document.querySelector('.launch-screen-copy').textContent,/未找到已保存的账户/);
+    assert.ok(!app.calls.some(c=>c.name==='launch_game'));
+    app.click('[data-action="launch-account"]');
+    assert.ok(app.w.document.querySelector('[data-action="begin-login"]'));
+  } finally {app.close();}
+});
+
+test('closing the launch page while authentication is pending does not start the game', async () => {
+  let complete;
+  const app=boot({known:true,restore:()=>new Promise(resolve=>{complete=resolve;})});
+  try {
+    await tick();app.click('[data-action="launch"]');await tick();
+    app.click('[data-action="close-launch-view"]');
+    complete({name:'RealPlayer',uuid:'abc',remembered:true});await tick();await tick();
+    assert.ok(!app.calls.some(c=>c.name==='launch_game'));
+  } finally {app.close();}
+});
+
+test('logout invalidates a pending restore and reports deletion errors', async () => {
+  let complete;
+  const app=boot({known:true,restore:()=>new Promise(resolve=>{complete=resolve;}),logout:()=>Promise.reject('已退出本次会话，但无法删除保存的账户')});
+  try {
+    await tick();app.click('[data-page="account"]');app.click('[data-action="logout-microsoft"]');await tick();
+    complete({name:'RealPlayer',uuid:'abc',remembered:true});await tick();
     assert.ok(app.w.document.querySelector('[data-action="begin-login"]'));
     assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-settings')).accountMode,'offline');
     assert.match(app.w.document.querySelector('.toast').textContent,/无法删除保存的账户/);
+    assert.notEqual(app.w.document.querySelector('.profile strong').textContent,'RealPlayer');
   } finally {app.close();}
 });
 
-
-test('a missing saved credential requires an explicit offline choice', async () => {
-  const app=boot({known:true,restore:()=>Promise.resolve(null)});
-  try {
-    await tick();await tick();
-    assert.ok(app.w.document.querySelector('[data-action="launch"]').disabled);
-    app.click('[data-page="account"]');
-    assert.match(app.w.document.querySelector('.identity-card').textContent,/未找到已保存的账户/);
-    app.click('[data-action="continue-offline"]');
-    assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-settings')).accountMode,'offline');
-    app.click('[data-page="home"]');
-    assert.equal(app.w.document.querySelector('[data-action="launch"]').disabled,false);
-  } finally {app.close();}
-});
-
-
-test('an unavailable credential store does not block a new offline user', async () => {
+test('a new offline user does not attempt account restoration', async () => {
   const app=boot({restore:()=>Promise.reject('凭据库不可用')});
-  try { await tick();await tick();assert.equal(app.w.document.querySelector('[data-action="launch"]').disabled,false); }
+  try { await tick();await tick();assert.ok(!app.calls.some(c=>c.name==='restore_microsoft_account'));assert.equal(app.w.document.querySelector('[data-action="launch"]').disabled,false); }
   finally {app.close();}
+});
+
+
+test('switching to offline while a background restore finishes stays offline', async () => {
+  let complete;
+  const app=boot({known:true,restore:()=>new Promise(resolve=>{complete=resolve;})});
+  try {
+    await tick();app.click('[data-page="account"]');app.click('[data-action="use-offline"]');
+    complete({name:'RealPlayer',uuid:'abc',remembered:true});await tick();await tick();
+    assert.equal(app.w.document.querySelector('.profile strong').textContent,'Player');
+    assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-settings')).accountMode,'offline');
+    app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+    assert.equal(app.calls.findLast(c=>c.name==='launch_game').args.options.accountMode,'offline');
+  } finally {app.close();}
+});
+
+test('an expired backend session provides an account recovery action', async () => {
+  const app=boot({known:true,restore:()=>Promise.resolve({name:'RealPlayer',uuid:'abc',remembered:true}),launch:()=>Promise.reject('微软登录授权失效，请重新登录')});
+  try {
+    await tick();await tick();app.click('[data-action="launch"]');await tick();
+    assert.match(app.w.document.querySelector('.launch-screen-copy').textContent,/请重新登录/);
+    app.click('[data-action="launch-account"]');
+    assert.ok(app.w.document.querySelector('[data-action="logout-microsoft"]'));
+  } finally {app.close();}
 });

@@ -1,13 +1,13 @@
 {
   "name": "ccl-launcher",
   "private": true,
-  "version": "0.1.11",
+  "version": "0.1.12",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "test": "node --test tests/job-manager.test.mjs tests/version-check.test.mjs && node --test tests/account-restore.test.cjs && node tests/ui.cjs",
+    "test": "node --test tests/job-manager.test.mjs tests/version-check.test.mjs && node --test tests/account-restore.test.cjs tests/update-ui.test.cjs && node tests/ui.cjs",
     "check:version": "node scripts/check-versions.mjs",
     "check": "npm run check:version && npm test && npm run build"
   },
