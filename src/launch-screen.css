@@ -32,3 +32,7 @@
 @keyframes ccl-disc-spin{to{transform:rotate(360deg)}}
 @media(max-height:700px){.launch-stage{gap:16px}.launch-album{--album-size:min(42vh,330px,40vw)}.launch-screen-copy{padding:16px 20px}.launch-screen-actions{margin-top:10px}}
 @media(prefers-reduced-motion:reduce){.launch-disc,.launch-disc-rotor{animation:none}.launch-progress i{animation:none;width:65%}.launch-progress.failed i{width:100%}}
+
+.crash-diagnosis{margin-top:15px;padding:14px 16px;border:1px solid rgba(191,160,137,.36);border-radius:14px;background:rgba(250,242,229,.72);color:#655b4d}
+.crash-diagnosis>span{display:block;color:#9a816a;font-size:10px;letter-spacing:.04em}.crash-diagnosis>strong{display:block;margin-top:5px;font-size:14px;color:#715b4c}.crash-diagnosis ul{margin:8px 0 0;padding-left:18px;font-size:11px;line-height:1.65}.crash-diagnosis small{display:block;margin-top:8px;color:#968b7c;font-size:10px}.crash-overlay{z-index:40}.crash-dialog{width:min(520px,90vw);border-radius:20px}.crash-dialog>div:last-child{display:flex;justify-content:flex-end;gap:8px;margin-top:18px}
+.launch-failed .launch-stage{gap:16px}.launch-failed .launch-album{--album-size:min(27vh,230px,35vw)}

@@ -4,7 +4,7 @@ const fs=require('node:fs');
 const path=require('node:path');
 const {JSDOM}=require('jsdom');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,10));
-function boot(){
+function boot(options={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
  const w=dom.window,calls=[],pending=[];
  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:'1.20.1',gameDir:'/game'}));
@@ -12,7 +12,13 @@ function boot(){
  w.invoke=(name,args={})=>{calls.push({name,args});
   if(name==='list_versions'||name==='installed_versions')return Promise.resolve([{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}]);
   if(name==='list_mods')return Promise.resolve([]);
-  if(name==='search_content')return Promise.resolve({hits:[{id:'project1',title:'示例项目',description:'简介',installed:false},{id:'project2',title:'已安装项目',description:'简介',installed:true}],hasMore:false});
+  if(name==='content_categories')return Promise.resolve([{id:'adventure',name:'Adventure'}]);
+  if(name==='instance_overview')return Promise.resolve({gameVersion:'1.20.1',loader:'fabric',isolated:true,mods:5,resourcePacks:2,shaderPacks:1,sizeBytes:10485760,sizeIncomplete:false,lastLaunched:1760000000});
+  if(name==='list_local_packs')return options.listPacks?options.listPacks(args):Promise.resolve(options.packs||[]);
+  if(name==='shader_environment')return Promise.resolve(options.shaderEnv||{loader:'vanilla',detected:[],uncertain:false});
+  if(name==='check_pack_updates')return Promise.resolve(options.packUpdates||{checked:0,unknown:0,failed:0,updates:[]});
+  if(name==='remove_local_pack'){options.packs=(options.packs||[]).filter(p=>p.name!==args.name);return Promise.resolve();}
+  if(name==='search_content')return Promise.resolve({hits:[{id:'project1',title:'示例项目',description:'简介',installed:false},{id:'project2',title:'已安装项目',description:'简介',installed:true}],hasMore:!!options.hasMore});
   if(name==='content_links')return Promise.resolve({links:[],description:'详情'});
   if(name==='curseforge_description')return Promise.resolve('详情');
   if(name==='list_pack_versions')return Promise.resolve([{id:'pack1',name:'第一版',number:'1',date:'2025-01-01'},{id:'pack2',name:'第二版',number:'2',date:'2025-02-01'}]);
@@ -59,5 +65,77 @@ test('shader packs support CurseForge without persisting its API key',async()=>{
   const install=app.calls.findLast(c=>c.name==='install_pack');assert.equal(install.args.kind,'shader');assert.equal(install.args.source,'curseforge');assert.equal(install.args.apiKey,'sample-secret-key');
   assert.doesNotMatch(app.w.localStorage.getItem('ccl-job-history'),/sample-secret-key/);
   app.click('[data-page=downloads]');app.click(`[data-cancel-job="${install.args.jobId}"]`);await tick();
+ } finally {app.close();}
+});
+
+
+test('manages local packs including manually added files and checks updates',async()=>{
+ const app=boot({packs:[{name:'manual.zip',directory:false},{name:'known.zip',source:'modrinth',projectId:'project1'}],packUpdates:{checked:1,unknown:1,failed:0,updates:[{name:'known.zip',latest:'known-new.zip',projectUrl:'https://modrinth.com/resourcepack/project1'}]}});try {
+  await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','resourcepack');await tick();await tick();
+  assert.match(app.w.document.querySelector('#local-pack-list').textContent,/manual.zip/);
+  assert.match(app.w.document.querySelector('#local-pack-list').textContent,/手动添加或来源未知/);
+  app.click('[data-action=check-pack-updates]');await tick();
+  assert.match(app.w.document.querySelector('#local-pack-list').textContent,/known-new.zip/);
+  assert.match(app.w.document.querySelector('#pack-update-summary').textContent,/已检查 1 个/);
+  app.click('[data-action=open-pack-folder]');await tick();assert.equal(app.calls.findLast(c=>c.name==='open_pack_folder').args.kind,'resourcepack');
+  const search=app.w.document.querySelector('#local-pack-search');search.value='manual';search.dispatchEvent(new app.w.Event('input',{bubbles:true}));
+  assert.doesNotMatch(app.w.document.querySelector('#local-pack-list').textContent,/known.zip/);
+  app.click('[data-pack-remove="0"]');assert.match(app.w.document.querySelector('.confirm-box').textContent,/共用此目录/);
+  app.click('[data-action=confirm-pack-remove]');await tick();await tick();
+  assert.equal(app.calls.findLast(c=>c.name==='remove_local_pack').args.name,'manual.zip');
+  assert.doesNotMatch(app.w.document.querySelector('#local-pack-list').textContent,/manual.zip/);
+ } finally {app.close();}
+});
+
+test('shader detection reports uncertainty and offers matching component search',async()=>{
+ const app=boot({shaderEnv:{loader:'fabric',detected:[],uncertain:true}});try {
+  await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','shader');await tick();await tick();
+  assert.match(app.w.document.querySelector('#shader-status').textContent,/无法完全确认/);
+  app.click('[data-action=find-shader-support]');await tick();await tick();
+  const search=app.calls.findLast(c=>c.name==='search_content');assert.equal(search.args.kind,'mod');assert.equal(search.args.query,'Iris');
+ } finally {app.close();}
+});
+
+test('shader detection reports installed component without claiming compatibility',async()=>{
+ const app=boot({shaderEnv:{loader:'fabric',detected:['Iris'],uncertain:false}});try {
+  await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','shader');await tick();await tick();
+  assert.match(app.w.document.querySelector('#shader-status').textContent,/已检测到 Iris/);
+  assert.match(app.w.document.querySelector('#shader-status').textContent,/实际运行/);
+  app.click('[data-content-install="0"]');await tick();assert.match(app.w.document.querySelector('.pack-dialog-status').textContent,/已检测到 Iris/);
+ } finally {app.close();}
+});
+
+
+test('ignores a stale local pack response after switching type',async()=>{
+ let resolveShader;
+ const app=boot({listPacks:({kind})=>kind==='shader'?new Promise(resolve=>{resolveShader=resolve;}):Promise.resolve([{name:'resource.zip'}])});try {
+  await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','shader');await tick();
+  app.change('#content-form [name=kind]','resourcepack');await tick();await tick();
+  resolveShader([{name:'stale-shader.zip'}]);await tick();
+  assert.match(app.w.document.querySelector('#local-pack-list').textContent,/resource.zip/);
+  assert.doesNotMatch(app.w.document.querySelector('#local-pack-list').textContent,/stale-shader.zip/);
+ } finally {app.close();}
+});
+
+
+test('filters modpacks and reuses recent results when paging back',async()=>{
+ const app=boot({hasMore:true});try {
+  await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','modpack');await tick();await tick();
+  app.change('#content-category','adventure');await tick();
+  const game=app.w.document.querySelector('[name=gameFilter]');game.value='1.20.1';
+  app.w.document.querySelector('#content-form').dispatchEvent(new app.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  app.change('[name=loaderFilter]','fabric');await tick();
+  let search=app.calls.findLast(c=>c.name==='search_content');assert.equal(search.args.kind,'modpack');assert.equal(search.args.category,'adventure');assert.equal(search.args.gameFilter,'1.20.1');assert.equal(search.args.loaderFilter,'fabric');
+  app.change('[name=environment]','client_only');await tick();search=app.calls.findLast(c=>c.name==='search_content');assert.equal(search.args.environment,'client_only');
+  app.click('[data-content-page="1"]');await tick();const count=app.calls.filter(c=>c.name==='search_content').length;
+  app.click('[data-content-page="0"]');await tick();assert.equal(app.calls.filter(c=>c.name==='search_content').length,count);
+ } finally {app.close();}
+});
+
+test('loads instance overview on demand and shows directory scope',async()=>{
+ const app=boot();try {
+  await tick();app.click('[data-page=versions]');assert.equal(app.calls.filter(c=>c.name==='instance_overview').length,0);
+  app.click('[data-instance-overview="1.20.1"]');await tick();const dialog=app.w.document.querySelector('.instance-dialog');assert.match(dialog.textContent,/1.20.1/);assert.match(dialog.textContent,/fabric/);assert.match(dialog.textContent,/10.0 MB/);assert.match(dialog.textContent,/独立游戏目录/);assert.equal(app.calls.findLast(c=>c.name==='instance_overview').args.version,'1.20.1');
+  app.click('[data-action=close-instance]');assert.equal(app.w.document.querySelector('.instance-dialog'),null);
  } finally {app.close();}
 });

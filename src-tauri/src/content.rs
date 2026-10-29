@@ -384,6 +384,87 @@ async fn query_json(builder: reqwest::RequestBuilder) -> ResultT<Value> {
         .await
         .map_err(|e| format!("内容数据解析失败: {e}"))
 }
+fn valid_category(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 100
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '+'))
+}
+
+#[derive(Serialize)]
+pub struct ContentCategory {
+    id: String,
+    name: String,
+}
+
+#[tauri::command]
+pub async fn content_categories(
+    source: String,
+    kind: String,
+    api_key: String,
+) -> ResultT<Vec<ContentCategory>> {
+    if !["mod", "modpack", "resourcepack", "shader"].contains(&kind.as_str()) {
+        return Err("未知内容类型".into());
+    }
+    let client = http_client()?;
+    let base = source_url(&source)?;
+    let result = if source == "modrinth" {
+        query_json(request(
+            &client,
+            &format!("{base}/tag/category"),
+            &source,
+            &api_key,
+        )?)
+        .await?
+    } else {
+        let class = match kind.as_str() {
+            "mod" => 6,
+            "modpack" => 4471,
+            _ => curse_pack_class(&client, &api_key, &kind).await?,
+        };
+        let response = query_json(
+            request(&client, &format!("{base}/categories"), &source, &api_key)?
+                .query(&[("gameId", "432"), ("classId", &class.to_string())]),
+        )
+        .await?;
+        response["data"].clone()
+    };
+    let mut categories: Vec<_> = result
+        .as_array()
+        .ok_or("分类数据格式无效")?
+        .iter()
+        .filter_map(|v| {
+            if source == "modrinth" {
+                if v["project_type"].as_str() != Some(&kind)
+                    || v["header"].as_str() == Some("loaders")
+                {
+                    return None;
+                }
+                let name = v["name"].as_str()?;
+                if !valid_category(name) {
+                    return None;
+                }
+                Some(ContentCategory {
+                    id: name.into(),
+                    name: name.into(),
+                })
+            } else {
+                if v["isClass"].as_bool() == Some(true) {
+                    return None;
+                }
+                Some(ContentCategory {
+                    id: v["id"].as_u64()?.to_string(),
+                    name: v["name"].as_str()?.to_string(),
+                })
+            }
+        })
+        .collect();
+    categories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    categories.dedup_by(|a, b| a.id == b.id);
+    Ok(categories)
+}
+
 #[tauri::command]
 pub async fn search_content(
     source: String,
@@ -394,6 +475,10 @@ pub async fn search_content(
     version: String,
     page: u32,
     sort: String,
+    category: Option<String>,
+    game_filter: Option<String>,
+    loader_filter: Option<String>,
+    environment: Option<String>,
 ) -> ResultT<ContentPage> {
     let base = source_url(&source)?;
     let sort_index = content_sort(&source, &sort)?;
@@ -403,6 +488,32 @@ pub async fn search_content(
     let offset = (page * 30).to_string();
     if !["mod", "modpack", "resourcepack", "shader"].contains(&kind.as_str()) {
         return Err("未知内容类型".into());
+    }
+    let category = category.filter(|v| !v.is_empty());
+    if let Some(value) = &category {
+        if source == "modrinth" {
+            if !valid_category(value) {
+                return Err("分类无效".into());
+            }
+        } else if !value.chars().all(|c| c.is_ascii_digit()) || value.len() > 12 {
+            return Err("分类无效".into());
+        }
+    }
+    let game_filter = game_filter.filter(|v| !v.is_empty());
+    if let Some(value) = &game_filter {
+        version_id(value)?;
+    }
+    let loader_filter = loader_filter.filter(|v| !v.is_empty());
+    if let Some(value) = &loader_filter {
+        if !["fabric", "quilt", "forge", "neoforge"].contains(&value.as_str()) {
+            return Err("加载器筛选无效".into());
+        }
+    }
+    let environment = environment.filter(|v| !v.is_empty());
+    if let Some(value) = &environment {
+        if source != "modrinth" || !["client_only", "client_and_server"].contains(&value.as_str()) {
+            return Err("环境筛选无效".into());
+        }
     }
     let client = http_client()?;
     let target = if kind != "modpack" {
@@ -422,6 +533,20 @@ pub async fn search_content(
                 if kind == "mod" {
                     filters.push(vec![format!("categories:{loader}")]);
                 }
+            }
+            if let Some(category) = &category {
+                filters.push(vec![format!("categories:{category}")]);
+            }
+            if kind == "modpack" {
+                if let Some(game) = &game_filter {
+                    filters.push(vec![format!("versions:{game}")]);
+                }
+                if let Some(loader) = &loader_filter {
+                    filters.push(vec![format!("categories:{loader}")]);
+                }
+            }
+            if let Some(environment) = &environment {
+                filters.push(vec![format!("environment:{environment}")]);
             }
             let facets = json!(filters).to_string();
             query_json(
@@ -458,6 +583,20 @@ pub async fn search_content(
                     req = req.query(&[(
                         "modLoaderType",
                         curse_loader(loader).ok_or("不支持的模组加载器")?,
+                    )]);
+                }
+            }
+            if let Some(category) = &category {
+                req = req.query(&[("categoryId", category)]);
+            }
+            if kind == "modpack" {
+                if let Some(game) = &game_filter {
+                    req = req.query(&[("gameVersion", game)]);
+                }
+                if let Some(loader) = &loader_filter {
+                    req = req.query(&[(
+                        "modLoaderType",
+                        curse_loader(loader).ok_or("不支持的加载器")?,
                     )]);
                 }
             }
@@ -1024,6 +1163,391 @@ pub async fn list_pack_versions(
         })
         .collect())
 }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalPack {
+    name: String,
+    directory: bool,
+    source: Option<String>,
+    project_id: Option<String>,
+}
+
+fn safe_pack_folder(dir: &Path, kind: &str, create: bool) -> ResultT<PathBuf> {
+    let folder = dir.join(pack_directory(kind)?);
+    if create {
+        fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
+    }
+    match fs::symlink_metadata(&folder) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() => Ok(folder),
+        Ok(_) => Err("资源包目录不是安全的普通目录".into()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(folder),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+fn local_pack_files(dir: &Path, kind: &str) -> ResultT<Vec<LocalPack>> {
+    let folder = safe_pack_folder(dir, kind, false)?;
+    let entries = match fs::read_dir(&folder) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(e) => return Err(e.to_string()),
+    };
+    let mut projects = HashMap::new();
+    for source in ["modrinth", "curseforge"] {
+        for (id, name) in installed_pack_projects(dir, kind, source) {
+            projects.entry(name).or_insert((source.to_string(), id));
+        }
+    }
+    let mut packs = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let Some(name) = entry.file_name().to_str().map(str::to_string) else {
+            continue;
+        };
+        if safe_name(&name).is_err() {
+            continue;
+        }
+        let meta = entry.file_type().map_err(|e| e.to_string())?;
+        let directory = meta.is_dir();
+        if !((meta.is_file() && name.to_ascii_lowercase().ends_with(".zip"))
+            || (directory
+                && match kind {
+                    "resourcepack" => entry.path().join("pack.mcmeta").is_file(),
+                    "shader" => entry.path().join("shaders").is_dir(),
+                    _ => false,
+                }))
+        {
+            continue;
+        }
+        let (source, project_id) = projects
+            .get(&name)
+            .map(|(s, i)| (Some(s.clone()), Some(i.clone())))
+            .unwrap_or((None, None));
+        packs.push(LocalPack {
+            name,
+            directory,
+            source,
+            project_id,
+        });
+    }
+    packs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    Ok(packs)
+}
+
+#[tauri::command]
+pub fn list_local_packs(
+    game_dir: String,
+    version: String,
+    kind: String,
+) -> ResultT<Vec<LocalPack>> {
+    let (dir, _, _) = current_instance(&game_dir, &version)?;
+    local_pack_files(&dir, &kind)
+}
+
+#[tauri::command]
+pub async fn remove_local_pack(
+    game_dir: String,
+    version: String,
+    kind: String,
+    name: String,
+) -> ResultT<()> {
+    safe_name(&name)?;
+    let (dir, _, _) = current_instance(&game_dir, &version)?;
+    let _lock = crate::resource_lock(format!("packs:{}", dir.display()))
+        .lock_owned()
+        .await;
+    let folder = safe_pack_folder(&dir, &kind, false)?;
+    if !local_pack_files(&dir, &kind)?
+        .iter()
+        .any(|p| p.name == name)
+    {
+        return Err("资源包不存在或不是可管理的资源包".into());
+    }
+    let target = folder.join(name);
+    let meta = fs::symlink_metadata(&target).map_err(|e| e.to_string())?;
+    if meta.is_file() {
+        fs::remove_file(target).map_err(|e| e.to_string())?;
+    } else if meta.is_dir() && !meta.file_type().is_symlink() {
+        fs::remove_dir_all(target).map_err(|e| e.to_string())?;
+    } else {
+        return Err("资源包文件类型无效".into());
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn open_pack_folder(game_dir: String, version: String, kind: String) -> ResultT<()> {
+    let (dir, _, _) = current_instance(&game_dir, &version)?;
+    let folder = safe_pack_folder(&dir, &kind, true)?;
+    #[cfg(target_os = "windows")]
+    let mut cmd = std::process::Command::new("explorer.exe");
+    #[cfg(target_os = "macos")]
+    let mut cmd = std::process::Command::new("open");
+    #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+    let mut cmd = std::process::Command::new("xdg-open");
+    cmd.arg(folder)
+        .spawn()
+        .map_err(|e| format!("无法打开资源包目录：{e}"))?;
+    Ok(())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackUpdate {
+    name: String,
+    latest: String,
+    project_url: Option<String>,
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PackUpdateCheck {
+    updates: Vec<PackUpdate>,
+    checked: usize,
+    unknown: usize,
+    failed: usize,
+}
+
+#[tauri::command]
+pub async fn check_pack_updates(
+    game_dir: String,
+    version: String,
+    kind: String,
+    api_key: String,
+) -> ResultT<PackUpdateCheck> {
+    let (dir, game, _) = current_instance(&game_dir, &version)?;
+    let packs = local_pack_files(&dir, &kind)?;
+    let client = http_client()?;
+    let results = stream::iter(packs.into_iter().map(|pack| {
+        let client = &client;
+        let game = &game;
+        let api_key = &api_key;
+        let kind = &kind;
+        async move {
+            let (Some(source), Some(id)) = (pack.source.as_deref(), pack.project_id.as_deref())
+            else {
+                return (0, 1, 0, None);
+            };
+            if source == "curseforge" && api_key.trim().is_empty() {
+                return (0, 1, 0, None);
+            }
+            let versions = match pack_versions_raw(client, source, id, game, api_key).await {
+                Ok(v) => v,
+                Err(_) => return (0, 0, 1, None),
+            };
+            let compatible: Vec<_> = versions
+                .iter()
+                .filter(|v| {
+                    pack_version_supports_game(v, source, game)
+                        && file_parts(source, v)
+                            .is_ok_and(|(name, _, _, _)| valid_pack_filename(name).is_ok())
+                })
+                .collect();
+            let date = |v: &Value| -> String {
+                v[if source == "modrinth" {
+                    "date_published"
+                } else {
+                    "fileDate"
+                }]
+                .as_str()
+                .unwrap_or("")
+                .to_string()
+            };
+            let current = compatible
+                .iter()
+                .find(|v| file_parts(source, v).is_ok_and(|(name, _, _, _)| name == pack.name));
+            let latest = compatible.iter().max_by_key(|v| date(v));
+            let (Some(current), Some(latest)) = (current, latest) else {
+                return (0, 1, 0, None);
+            };
+            if date(current).is_empty() || date(latest).is_empty() {
+                return (0, 1, 0, None);
+            }
+            let update = if date(latest) > date(current) {
+                let latest_name = file_parts(source, latest)
+                    .map(|p| p.0.to_string())
+                    .unwrap_or_default();
+                let url = if source == "modrinth" {
+                    Some(format!("https://modrinth.com/{kind}/{id}"))
+                } else {
+                    match request(
+                        client,
+                        &format!("https://api.curseforge.com/v1/mods/{id}"),
+                        source,
+                        api_key,
+                    ) {
+                        Ok(req) => query_json(req)
+                            .await
+                            .ok()
+                            .and_then(|v| project_url(&v["data"], source, kind, id)),
+                        Err(_) => None,
+                    }
+                };
+                Some(PackUpdate {
+                    name: pack.name.clone(),
+                    latest: latest_name,
+                    project_url: url,
+                })
+            } else {
+                None
+            };
+            (1, 0, 0, update)
+        }
+    }))
+    .buffer_unordered(4)
+    .collect::<Vec<_>>()
+    .await;
+    Ok(PackUpdateCheck {
+        checked: results.iter().map(|r| r.0).sum(),
+        unknown: results.iter().map(|r| r.1).sum(),
+        failed: results.iter().map(|r| r.2).sum(),
+        updates: results.into_iter().filter_map(|r| r.3).collect(),
+    })
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ShaderEnvironment {
+    loader: String,
+    detected: Vec<String>,
+    uncertain: bool,
+}
+
+fn shader_mod_id(path: &Path, loader: &str) -> ResultT<Vec<String>> {
+    let file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut zip = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let mut ids = Vec::new();
+    for name in [
+        "fabric.mod.json",
+        "quilt.mod.json",
+        "META-INF/mods.toml",
+        "META-INF/neoforge.mods.toml",
+    ] {
+        let usable = match loader {
+            "fabric" => name == "fabric.mod.json",
+            "quilt" => name == "fabric.mod.json" || name == "quilt.mod.json",
+            "forge" => name == "META-INF/mods.toml",
+            "neoforge" => name == "META-INF/neoforge.mods.toml" || name == "META-INF/mods.toml",
+            _ => false,
+        };
+        if !usable {
+            continue;
+        }
+        if let Ok(entry) = zip.by_name(name) {
+            if entry.size() > 256 * 1024 {
+                continue;
+            }
+            let mut text = String::new();
+            entry
+                .take(256 * 1024)
+                .read_to_string(&mut text)
+                .map_err(|e| e.to_string())?;
+            if name.ends_with(".json") {
+                if let Ok(v) = serde_json::from_str::<Value>(&text) {
+                    if let Some(id) = v["id"]
+                        .as_str()
+                        .or_else(|| v["quilt_loader"]["id"].as_str())
+                    {
+                        ids.push(id.to_ascii_lowercase());
+                    }
+                }
+            } else {
+                for line in text.lines() {
+                    if let Some((key, value)) = line.split_once('=') {
+                        if key.trim() == "modId" {
+                            ids.push(
+                                value
+                                    .split('#')
+                                    .next()
+                                    .unwrap_or("")
+                                    .trim()
+                                    .trim_matches(['\'', '"'])
+                                    .to_ascii_lowercase(),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+pub async fn shader_environment(game_dir: String, version: String) -> ResultT<ShaderEnvironment> {
+    tokio::task::spawn_blocking(move || shader_environment_impl(game_dir, version))
+        .await
+        .map_err(|e| format!("光影环境检测失败：{e}"))?
+}
+
+fn shader_environment_impl(game_dir: String, version: String) -> ResultT<ShaderEnvironment> {
+    let root_dir = root(&game_dir)?;
+    let meta = loaders::version_json(&root_dir, &version)?;
+    let (dir, _, loader) = current_instance(&game_dir, &version)?;
+    let mut detected = Vec::new();
+    let mut uncertain = false;
+    let optifine = meta["id"]
+        .as_str()
+        .is_some_and(|v| v.to_ascii_lowercase().contains("optifine"))
+        || meta["libraries"].as_array().is_some_and(|libs| {
+            libs.iter().any(|lib| {
+                lib["name"]
+                    .as_str()
+                    .is_some_and(|n| n.to_ascii_lowercase().starts_with("optifine:optifine:"))
+            })
+        });
+    if optifine {
+        detected.push("OptiFine".to_string());
+    }
+    if loader != "vanilla" {
+        match fs::read_dir(dir.join("mods")) {
+            Ok(entries) => {
+                for entry in entries {
+                    let entry = match entry {
+                        Ok(e) => e,
+                        Err(_) => {
+                            uncertain = true;
+                            continue;
+                        }
+                    };
+                    if !entry.file_type().is_ok_and(|t| t.is_file())
+                        || !entry
+                            .file_name()
+                            .to_string_lossy()
+                            .to_ascii_lowercase()
+                            .ends_with(".jar")
+                    {
+                        continue;
+                    }
+                    match shader_mod_id(&entry.path(), &loader) {
+                        Ok(ids) if ids.is_empty() => uncertain = true,
+                        Ok(ids) => {
+                            for (id, label) in [
+                                ("iris", "Iris"),
+                                ("oculus", "Oculus"),
+                                ("optifine", "OptiFine"),
+                            ] {
+                                if ids.iter().any(|v| v == id)
+                                    && !detected.iter().any(|v| v == label)
+                                {
+                                    detected.push(label.to_string());
+                                }
+                            }
+                        }
+                        Err(_) => uncertain = true,
+                    }
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => uncertain = true,
+        }
+    }
+    Ok(ShaderEnvironment {
+        loader,
+        detected,
+        uncertain,
+    })
+}
+
 #[tauri::command]
 pub fn list_mods(game_dir: String, version: String) -> ResultT<Vec<LocalMod>> {
     let (dir, _, _) = current_instance(&game_dir, &version)?;
@@ -1370,14 +1894,16 @@ fn valid_pack_filename(name: &str) -> ResultT<()> {
 }
 
 async fn fetch_pack_file(
+    app: &tauri::AppHandle,
+    job_id: Option<&str>,
     client: &reqwest::Client,
-    kind: &str,
     url: &str,
+    path: &Path,
     sha1: Option<&str>,
     sha512: Option<&str>,
     md5: Option<&str>,
-) -> ResultT<Vec<u8>> {
-    const MAX_BYTES: usize = 512 * 1024 * 1024;
+) -> ResultT<()> {
+    const MAX_BYTES: u64 = 512 * 1024 * 1024;
     if !url.starts_with("https://") {
         return Err("下载地址必须使用 HTTPS".into());
     }
@@ -1385,44 +1911,72 @@ async fn fetch_pack_file(
         return Err("来源未提供可用的文件校验值".into());
     }
     let _slot = crate::download_slot().await?;
-    let mut response = client
-        .get(url)
-        .timeout(Duration::from_secs(300))
-        .send()
-        .await
-        .map_err(|e| format!("文件下载失败：{e:#}"))?
-        .error_for_status()
-        .map_err(|e| e.to_string())?;
-    if response
-        .content_length()
-        .is_some_and(|size| size > MAX_BYTES as u64)
-    {
-        return Err("资源包超过 512 MB 上限".into());
-    }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
-        if bytes.len().saturating_add(chunk.len()) > MAX_BYTES {
-            return Err("资源包超过 512 MB 上限".into());
+    for attempt in 0..2 {
+        if attempt > 0 {
+            let _ = tokio::fs::remove_file(path).await;
+            crate::report(app, job_id, "校验失败，正在重新下载", 0, 0);
         }
-        bytes.extend_from_slice(&chunk);
+        crate::transfer::download(client, url, path, MAX_BYTES, |current, total| {
+            crate::report(
+                app,
+                job_id,
+                "正在下载资源包",
+                current as usize,
+                total as usize,
+            )
+        })
+        .await?;
+        crate::report(app, job_id, "正在校验资源包", 0, 0);
+        match verify_pack_file(path, sha1, sha512, md5, job_id) {
+            Ok(()) => return Ok(()),
+            Err(e) if attempt == 0 && e == "文件哈希校验失败" => continue,
+            Err(e) => return Err(e),
+        }
     }
-    if sha512.is_some_and(|expected| {
-        format!("{:x}", Sha512::digest(&bytes)) != expected.to_ascii_lowercase()
-    }) || sha1.is_some_and(|expected| {
-        format!("{:x}", Sha1::digest(&bytes)) != expected.to_ascii_lowercase()
-    }) || md5.is_some_and(|expected| {
-        format!("{:x}", md5::compute(&bytes)) != expected.to_ascii_lowercase()
-    }) {
-        return Err("文件哈希校验失败".into());
-    }
-    validate_pack_zip(&bytes, kind)?;
-    Ok(bytes)
+    Err("文件哈希校验失败".into())
 }
 
-fn validate_pack_zip(bytes: &[u8], kind: &str) -> ResultT<()> {
+fn verify_pack_file(
+    path: &Path,
+    sha1: Option<&str>,
+    sha512: Option<&str>,
+    md5: Option<&str>,
+    job_id: Option<&str>,
+) -> ResultT<()> {
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut h1 = Sha1::new();
+    let mut h512 = Sha512::new();
+    let mut hmd5 = md5::Context::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        crate::jobs::check(job_id)?;
+        let size = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if size == 0 {
+            break;
+        }
+        let chunk = &buffer[..size];
+        if sha1.is_some() {
+            h1.update(chunk);
+        }
+        if sha512.is_some() {
+            h512.update(chunk);
+        }
+        if md5.is_some() {
+            hmd5.consume(chunk);
+        }
+    }
+    if sha1.is_some_and(|v| format!("{:x}", h1.finalize()) != v.to_ascii_lowercase())
+        || sha512.is_some_and(|v| format!("{:x}", h512.finalize()) != v.to_ascii_lowercase())
+        || md5.is_some_and(|v| format!("{:x}", hmd5.compute()) != v.to_ascii_lowercase())
+    {
+        return Err("文件哈希校验失败".into());
+    }
+    Ok(())
+}
+
+fn validate_pack_archive(reader: impl Read + std::io::Seek, kind: &str) -> ResultT<()> {
     pack_directory(kind)?;
-    let archive = zip::ZipArchive::new(std::io::Cursor::new(bytes))
-        .map_err(|_| "资源包不是有效的 ZIP 文件")?;
+    let archive = zip::ZipArchive::new(reader).map_err(|_| "资源包不是有效的 ZIP 文件")?;
     if archive.len() > 100_000 {
         return Err("资源包包含过多文件".into());
     }
@@ -1441,14 +1995,19 @@ fn validate_pack_zip(bytes: &[u8], kind: &str) -> ResultT<()> {
     }
     Ok(())
 }
+#[cfg(test)]
+fn validate_pack_zip(bytes: &[u8], kind: &str) -> ResultT<()> {
+    validate_pack_archive(std::io::Cursor::new(bytes), kind)
+}
 
-fn save_pack(
+fn save_pack_reader(
     dir: &Path,
     kind: &str,
     source: &str,
     canonical: &str,
     name: &str,
-    bytes: &[u8],
+    reader: &mut impl Read,
+    job_id: Option<&str>,
 ) -> ResultT<()> {
     use std::io::Write;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -1456,7 +2015,6 @@ fn save_pack(
     source_url(source)?;
     valid_id(canonical)?;
     valid_pack_filename(name)?;
-    validate_pack_zip(bytes, kind)?;
     if installed_pack_projects(dir, kind, source).contains_key(canonical) {
         return Err("该项目已安装到目标游戏目录".into());
     }
@@ -1489,7 +2047,7 @@ fn save_pack(
         .create_new(true)
         .open(&destination)
         .map_err(|e| format!("无法保存资源包（文件可能已存在）：{e}"))?;
-    if let Err(e) = output.write_all(bytes) {
+    if let Err(e) = crate::jobs::copy_checked(reader, &mut output, job_id) {
         drop(output);
         let _ = fs::remove_file(&destination);
         return Err(format!("无法保存资源包：{e}"));
@@ -1518,6 +2076,27 @@ fn save_pack(
         return Err(format!("无法保存资源包安装记录：{e}"));
     }
     Ok(())
+}
+
+#[cfg(test)]
+fn save_pack(
+    dir: &Path,
+    kind: &str,
+    source: &str,
+    canonical: &str,
+    name: &str,
+    bytes: &[u8],
+) -> ResultT<()> {
+    validate_pack_zip(bytes, kind)?;
+    save_pack_reader(
+        dir,
+        kind,
+        source,
+        canonical,
+        name,
+        &mut std::io::Cursor::new(bytes),
+        None,
+    )
 }
 
 #[tauri::command]
@@ -1640,9 +2219,37 @@ async fn install_pack_impl(
     };
     valid_pack_filename(name)?;
     crate::report(&app, job_id.as_deref(), "正在下载资源包", 0, 0);
-    let bytes = fetch_pack_file(&client, &kind, url, sha1, sha512, md5).await?;
+    let folder = safe_pack_folder(&dir, &kind, true)?;
+    static SERIAL: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let temp = folder.join(format!(
+        ".ccl-download-{}-{}.part",
+        std::process::id(),
+        SERIAL.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+    ));
+    let _cleanup = crate::jobs::CleanupPath::file(temp.clone());
+    fetch_pack_file(
+        &app,
+        job_id.as_deref(),
+        &client,
+        url,
+        &temp,
+        sha1,
+        sha512,
+        md5,
+    )
+    .await?;
     crate::jobs::check(job_id.as_deref())?;
-    save_pack(&dir, &kind, &source, &canonical, name, &bytes)
+    validate_pack_archive(fs::File::open(&temp).map_err(|e| e.to_string())?, &kind)?;
+    let mut input = fs::File::open(&temp).map_err(|e| e.to_string())?;
+    save_pack_reader(
+        &dir,
+        &kind,
+        &source,
+        &canonical,
+        name,
+        &mut input,
+        job_id.as_deref(),
+    )
 }
 
 #[tauri::command]
@@ -2288,6 +2895,98 @@ mod tests {
     }
 
     #[test]
+    fn local_packs_include_manual_files_and_ignore_symlinks() {
+        let dir = std::env::temp_dir().join(format!("ccl-local-packs-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("resourcepacks/folder-pack")).unwrap();
+        fs::write(dir.join("resourcepacks/folder-pack/pack.mcmeta"), b"{}").unwrap();
+        fs::write(dir.join("resourcepacks/manual.ZIP"), b"manual").unwrap();
+        fs::write(dir.join("resourcepacks/unrelated.txt"), b"text").unwrap();
+        save_pack(
+            &dir,
+            "resourcepack",
+            "modrinth",
+            "project1",
+            "managed.zip",
+            &pack_archive("pack.mcmeta"),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(
+            dir.join("resourcepacks/manual.ZIP"),
+            dir.join("resourcepacks/link.zip"),
+        )
+        .unwrap();
+        let packs = local_pack_files(&dir, "resourcepack").unwrap();
+        assert_eq!(packs.len(), 3);
+        assert!(packs.iter().any(|p| p.name == "folder-pack" && p.directory));
+        assert!(packs
+            .iter()
+            .any(|p| p.name == "manual.ZIP" && p.source.is_none()));
+        assert!(packs
+            .iter()
+            .any(|p| p.name == "managed.zip" && p.project_id.as_deref() == Some("project1")));
+        #[cfg(unix)]
+        {
+            fs::create_dir_all(dir.join("outside")).unwrap();
+            std::os::unix::fs::symlink(dir.join("outside"), dir.join("shaderpacks")).unwrap();
+            assert!(local_pack_files(&dir, "shader").is_err());
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn shader_mod_detection_reads_metadata_not_filename() {
+        let dir = std::env::temp_dir().join(format!("ccl-shader-detect-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("versions/test")).unwrap();
+        fs::create_dir_all(dir.join("instances/test/mods")).unwrap();
+        fs::write(
+            dir.join("versions/test/test.json"),
+            br#"{"id":"test","cclLoader":"fabric","cclInstance":true}"#,
+        )
+        .unwrap();
+        let make_jar = |path: &Path, entry: &str, contents: &[u8]| {
+            let mut writer = zip::ZipWriter::new(fs::File::create(path).unwrap());
+            writer
+                .start_file(entry, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            writer.write_all(contents).unwrap();
+            writer.finish().unwrap();
+        };
+        make_jar(
+            &dir.join("instances/test/mods/renamed.jar"),
+            "fabric.mod.json",
+            br#"{"id":"iris"}"#,
+        );
+        make_jar(
+            &dir.join("instances/test/mods/oculus.jar.disabled"),
+            "META-INF/mods.toml",
+            b"modId = \"oculus\"",
+        );
+        let status =
+            shader_environment_impl(dir.to_string_lossy().into_owned(), "test".into()).unwrap();
+        assert_eq!(status.detected, vec!["Iris"]);
+        assert!(!status.uncertain);
+        make_jar(
+            &dir.join("instances/test/mods/wrong-loader.jar"),
+            "META-INF/mods.toml",
+            b"modId = \"oculus\"",
+        );
+        let mismatch =
+            shader_environment_impl(dir.to_string_lossy().into_owned(), "test".into()).unwrap();
+        assert_eq!(mismatch.detected, vec!["Iris"]);
+        assert!(mismatch.uncertain);
+        fs::write(dir.join("instances/test/mods/broken.jar"), b"bad").unwrap();
+        assert!(
+            shader_environment_impl(dir.to_string_lossy().into_owned(), "test".into())
+                .unwrap()
+                .uncertain
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
     fn packs_validate_files_and_preserve_existing_data() {
         let dir = std::env::temp_dir().join(format!("ccl-pack-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -2334,6 +3033,23 @@ mod tests {
             fs::read(dir.join("resourcepacks/pack.zip")).unwrap(),
             resource
         );
+        let expected = format!("{:x}", Sha1::digest(&resource));
+        assert!(verify_pack_file(
+            &dir.join("resourcepacks/pack.zip"),
+            Some(&expected),
+            None,
+            None,
+            None
+        )
+        .is_ok());
+        assert!(verify_pack_file(
+            &dir.join("resourcepacks/pack.zip"),
+            Some("0000000000000000000000000000000000000000"),
+            None,
+            None,
+            None
+        )
+        .is_err());
         save_pack(&dir, "shader", "curseforge", "123", "shader.zip", &shader).unwrap();
         assert!(installed_pack_projects(&dir, "shader", "curseforge").contains_key("123"));
         assert!(installed_pack_projects(&dir, "resourcepack", "modrinth").contains_key("project1"));

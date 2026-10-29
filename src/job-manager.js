@@ -14,7 +14,7 @@ function jobList() {
   return `<article class="job-card ${job.status}" data-job-id="${esc(job.id)}"><div class="job-top"><div class="job-icon">${icon(job.kind==='java' ? 'monitor' : job.kind==='mod' ? 'blocks' : 'box',18)}</div><div class="job-info"><strong>${esc(job.title)}</strong><small class="job-message">${esc(job.message || labels[job.status])}</small></div><span class="job-state">${labels[job.status]}</span></div><div class="job-progress-line"><div class="progress-track"><i class="job-track" style="width:${job.status==='done' ? 100 : percent}%"></i></div><span class="job-count">${jobCount(job)}</span></div><div class="job-metrics">${esc(job.metrics || '')}</div>${job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${['queued','running','canceling','failed','cancelled','done'].includes(job.status) ? `<div class="job-actions">${['queued','running','canceling'].includes(job.status)?`<button class="row-button" data-cancel-job="${esc(job.id)}" ${job.status==='canceling'?'disabled':''}>${job.status==='canceling'?'正在取消…':'取消任务'}</button>`:''}${['failed','cancelled'].includes(job.status)&&job.run?`<button class="row-button" data-retry-job="${esc(job.id)}">${icon('refresh-cw',14)} 重试</button>`:''}${['failed','cancelled','done'].includes(job.status)?`<button class="row-button" data-remove-job="${esc(job.id)}">移除记录</button>`:''}</div>` : ''}</article>`;
  }).join('');
 }
-function jobCount(job) { if(!job.total) return job.status==='queued'?'排队中':job.status==='done'?'完成':'—'; return job.kind==='java' ? `${(job.current/1048576).toFixed(1)} / ${(job.total/1048576).toFixed(1)} MB` : `${job.current} / ${job.total} 项`; }
+function jobCount(job) { const bytes=['java','resourcepack','shader'].includes(job.kind); if(!job.total) return job.status==='queued'?'排队中':job.status==='done'?'完成':bytes && job.current>0 ? `${(job.current/1048576).toFixed(1)} MB` : '—'; return bytes ? `${(job.current/1048576).toFixed(1)} / ${(job.total/1048576).toFixed(1)} MB` : `${job.current} / ${job.total} 项`; }
 function saveJobs() { try { storage.setItem('ccl-job-history',JSON.stringify(state.jobs.slice(-100).map(({id,key,kind,title,status,gameDir,version,recipe})=>({id,key,kind,title,status,gameDir,version,recipe})))); } catch {} }
 function runnerFor(recipe) {
  if(!recipe || typeof recipe!=='object') return null;
@@ -63,9 +63,9 @@ async function requestJobCancel(job) {
 function jobEvent(payload) {
  const job=state.jobs.find(j=>j.id===payload.jobId); if (!job || job.status!=='running') return;
  const current=Number(payload.current)||0,total=Number(payload.total)||0,now=Date.now();let metrics='';
- if(job.kind==='java' && payload.message==='正在下载 Java' && total>0) {
+ if((job.kind==='java' && payload.message==='正在下载 Java') || (['resourcepack','shader'].includes(job.kind) && payload.message==='正在下载资源包')) {
   const previous=job.lastSample;
-  if(previous && now>previous.time && current>=previous.current && previous.total===total) { const speed=(current-previous.current)*1000/(now-previous.time);if(speed>0){const remaining=Math.max(0,Math.ceil((total-current)/speed));metrics=`${(speed/1048576).toFixed(2)} MB/s · 预计 ${remaining>=60?`${Math.floor(remaining/60)} 分 ${remaining%60} 秒`:`${remaining} 秒`}`;} }
+  if(previous && now>previous.time && current>=previous.current && previous.total===total) { const speed=(current-previous.current)*1000/(now-previous.time);if(speed>0){const remaining=Math.max(0,Math.ceil((total-current)/speed));metrics=`${(speed/1048576).toFixed(2)} MB/s${total>0?` · 预计 ${remaining>=60?`${Math.floor(remaining/60)} 分 ${remaining%60} 秒`:`${remaining} 秒`}`:''}`;} }
   job.lastSample={time:now,current,total};
  } else job.lastSample=null;
  updateJob(job,{message:payload.message,current,total,metrics});

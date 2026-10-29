@@ -86,3 +86,18 @@ test('a refresh failure does not stall the remaining queue', async () => {
   assert.equal(secondRan, true);
   assert.equal(state.jobs[1].status, 'done');
 });
+
+
+test('resource pack downloads report byte speed with and without a known length', async () => {
+ const {manager,state}=setup();let finish;
+ manager.enqueueJob({key:'pack',kind:'shader',title:'Shader',run:()=>new Promise(resolve=>{finish=resolve;})});await tick();
+ const job=state.jobs[0], realNow=Date.now;
+ try {
+  Date.now=()=>1000;manager.jobEvent({jobId:job.id,message:'正在下载资源包',current:0,total:4*1048576});
+  Date.now=()=>2000;manager.jobEvent({jobId:job.id,message:'正在下载资源包',current:1048576,total:4*1048576});
+  assert.match(job.metrics,/1.00 MB\/s/);assert.match(job.metrics,/预计 3 秒/);
+  Date.now=()=>3000;manager.jobEvent({jobId:job.id,message:'正在下载资源包',current:1048576,total:0});
+  Date.now=()=>4000;manager.jobEvent({jobId:job.id,message:'正在下载资源包',current:2*1048576,total:0});
+  assert.match(job.metrics,/1.00 MB\/s/);assert.doesNotMatch(job.metrics,/预计/);
+ } finally {Date.now=realNow;finish();await tick();}
+});

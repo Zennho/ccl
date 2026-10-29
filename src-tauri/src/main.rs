@@ -3,15 +3,18 @@ mod archive;
 mod auth;
 mod content;
 mod credentials;
+mod diagnostics;
 mod java;
 mod jobs;
 mod lan;
 mod lan_core;
 mod loaders;
 mod memory;
+mod overview;
 mod server_catalog;
 mod source_probe;
 mod thumbnails;
+mod transfer;
 mod update;
 mod version_manager;
 mod window_detect;
@@ -347,6 +350,20 @@ async fn download_slot() -> ResultT<tokio::sync::OwnedSemaphorePermit> {
         .await
         .map_err(|e| e.to_string())
 }
+fn file_sha1(path: &Path) -> ResultT<String> {
+    use std::io::Read;
+    let mut file = fs::File::open(path).map_err(|e| e.to_string())?;
+    let mut hash = Sha1::new();
+    let mut buffer = [0u8; 64 * 1024];
+    loop {
+        let size = file.read(&mut buffer).map_err(|e| e.to_string())?;
+        if size == 0 {
+            break;
+        }
+        hash.update(&buffer[..size]);
+    }
+    Ok(format!("{:x}", hash.finalize()))
+}
 async fn download(
     client: &reqwest::Client,
     url: &str,
@@ -359,19 +376,14 @@ async fn download(
         .await;
     if dest.exists() {
         if let Some(expected) = sha {
-            if let Ok(bytes) = tokio::fs::read(dest).await {
-                if format!("{:x}", Sha1::digest(&bytes)) == expected {
-                    return Ok(prefer_mirror);
-                }
+            if file_sha1(dest).is_ok_and(|actual| actual.eq_ignore_ascii_case(expected)) {
+                return Ok(prefer_mirror);
             }
         } else {
             return Ok(prefer_mirror);
         }
     }
     let _slot = download_slot().await?;
-    let (bytes, mirrored) = fetch_bytes(client, url, prefer_mirror, Duration::from_secs(300), sha)
-        .await
-        .map_err(|e| format!("下载失败 {url}: {e}"))?;
     if let Some(parent) = dest.parent() {
         tokio::fs::create_dir_all(parent)
             .await
@@ -384,16 +396,56 @@ async fn download(
         TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)
     ));
     let _cleanup = jobs::CleanupPath::file(temporary.clone());
-    if let Err(e) = fs::write(&temporary, bytes) {
-        let _ = tokio::fs::remove_file(&temporary).await;
-        return Err(e.to_string());
-    }
-    if let Err(e) = fs::rename(&temporary, dest) {
-        let _ = tokio::fs::remove_file(&temporary).await;
-        return Err(e.to_string());
-    }
+    let mirrored = if let Some(expected) = sha {
+        let mut candidates = vec![(url.to_string(), false)];
+        if let Some(mirror) = mirror_url(url) {
+            candidates.push((mirror, true));
+        }
+        if prefer_mirror {
+            candidates.reverse();
+        }
+        let mut selected = None;
+        let mut errors = Vec::new();
+        for (candidate, is_mirror) in candidates {
+            let _ = tokio::fs::remove_file(&temporary).await;
+            match transfer::download(
+                client,
+                &candidate,
+                &temporary,
+                1024 * 1024 * 1024,
+                |_, _| {},
+            )
+            .await
+            {
+                Ok(()) => match file_sha1(&temporary) {
+                    Ok(hash) if hash.eq_ignore_ascii_case(expected) => {
+                        selected = Some(is_mirror);
+                        break;
+                    }
+                    Ok(_) => errors.push(format!(
+                        "{}：文件校验失败",
+                        if is_mirror { "镜像" } else { "官方" }
+                    )),
+                    Err(e) => errors.push(e),
+                },
+                Err(e) => errors.push(format!("{}：{e}", if is_mirror { "镜像" } else { "官方" })),
+            }
+        }
+        selected.ok_or_else(|| format!("下载失败 {url}: {}", errors.join("；")))?
+    } else {
+        let (bytes, mirrored) =
+            fetch_bytes(client, url, prefer_mirror, Duration::from_secs(300), None)
+                .await
+                .map_err(|e| format!("下载失败 {url}: {e}"))?;
+        tokio::fs::write(&temporary, bytes)
+            .await
+            .map_err(|e| e.to_string())?;
+        mirrored
+    };
+    fs::rename(&temporary, dest).map_err(|e| e.to_string())?;
     Ok(mirrored)
 }
+
 fn report(
     app: &tauri::AppHandle,
     job_id: Option<&str>,
@@ -818,6 +870,7 @@ struct GameExit {
     code: Option<i32>,
     log_path: String,
     game_dir: String,
+    diagnosis: Option<diagnostics::Diagnosis>,
 }
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -1081,9 +1134,11 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(0x08000000);
     }
+    let started_at = std::time::SystemTime::now();
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("无法启动 Java：{e}。请检查 Java 路径和版本。"))?;
+    overview::record_launch(&dir, &options.version);
     let path_text = log_path.to_string_lossy().to_string();
     let event_path = path_text.clone();
     let version = options.version;
@@ -1144,6 +1199,11 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
         if let Ok(mut file) = fs::OpenOptions::new().append(true).open(&log_path) {
             let _ = writeln!(file, "\nCCL: 进程退出状态 {:?}", code);
         }
+        let diagnosis = if success {
+            None
+        } else {
+            Some(diagnostics::diagnose(&log_path, &runtime_dir, started_at))
+        };
         let _ = app.emit(
             "game-exit",
             GameExit {
@@ -1153,6 +1213,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
                 code,
                 log_path: event_path,
                 game_dir,
+                diagnosis,
             },
         );
     });
@@ -1190,6 +1251,7 @@ fn main() {
             configure_proxy,
             list_versions,
             installed_versions,
+            overview::instance_overview,
             install_version,
             launch_game,
             memory::memory_info,
@@ -1215,12 +1277,18 @@ fn main() {
             java::remove_java,
             loaders::install_loader,
             content::search_content,
+            content::content_categories,
             content::open_content_page,
             content::content_links,
             content::curseforge_description,
             content::list_mod_versions,
             content::list_pack_versions,
             content::install_pack,
+            content::list_local_packs,
+            content::remove_local_pack,
+            content::open_pack_folder,
+            content::check_pack_updates,
+            content::shader_environment,
             content::list_mods,
             content::check_mod_updates,
             content::set_mod_enabled,
