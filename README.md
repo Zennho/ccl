@@ -6,6 +6,10 @@
 
 CCL is an independent, open-source Minecraft: Java Edition launcher for Windows, Linux and macOS. It is not affiliated with Mojang or Microsoft.
 
+![CCL 启动主页，显示横幅和当前游戏版本](docs/screenshots/home.webp)
+
+*启动主页，截图中的账户和游戏版本为示例数据。*
+
 ## 下载与安装
 
 前往 [Releases](https://github.com/Zennho/ccl/releases) 下载适合自己系统的安装包：
@@ -31,6 +35,10 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 - **自动检查更新**：启动后及运行期间定期检查 GitHub 最新正式版，也可在设置中手动检查；发现新版本时可打开 Release 页面下载安装。
 - **界面外观**：默认主页横幅随本机时间切换白天、傍晚和夜晚场景；也可自定义横幅和背景，分别调整透明度、磨砂与模糊效果。
 - **启动设置与日志**：可为当前版本切换版本隔离，分别保存存档、模组和配置；整合包始终隔离，切换目录时不会移动已有数据。最大内存支持手动设置，也可在启动时根据设备总内存和可用内存自动分配。还可配置 Java 路径、G1GC、自定义参数及网络代理。启动日志保存在游戏目录的 `logs/ccl` 中；检测到游戏窗口出现后自动返回主页，如果无法检测窗口可手动返回。
+
+![CCL 版本管理界面，展示已安装和可安装的游戏版本](docs/screenshots/versions.webp)
+
+*版本管理界面，截图中的游戏版本为示例数据。*
 
 ## 使用须知
 
