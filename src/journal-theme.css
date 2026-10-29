@@ -44,3 +44,11 @@
 
 .brand small{letter-spacing:.2px;white-space:nowrap}
 .brand-mark{flex:none;display:block;transform:none;border-radius:9px;background:url('./assets/branding/compass-craft-preview.png') center / cover no-repeat}
+
+/* The front and hat layers share the pixel scale of a 64-pixel skin. */
+.avatar{position:relative;overflow:hidden;flex:none}.avatar-skin{display:none;position:absolute;width:800%;max-width:none;height:auto;top:-100%;image-rendering:pixelated}.avatar-face{left:-100%}.avatar-overlay{left:-500%}.avatar.has-skin .avatar-skin{display:block}.avatar.has-skin .avatar-fallback{display:none}
+
+.saved-account-list{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.instance-settings-note{color:#758271;line-height:1.5}
+#instance-settings-form .option-check{display:flex;justify-content:flex-start;align-items:center;gap:8px}
+#instance-settings-form .option-check input{width:auto;flex:none;margin:0;accent-color:#729168}
+#instance-memory-mode{min-width:180px;padding:10px 12px;border:1px solid #d5dccc;border-radius:9px;background:#faf9f3;color:#394437;font:inherit}

@@ -603,6 +603,38 @@ pub async fn logout_microsoft() -> ResultT<()> {
     removal.map_err(|error| format!("已退出本次会话，但{error}；保存的账户可能仍可恢复"))
 }
 #[tauri::command]
+pub async fn list_microsoft_accounts() -> ResultT<Vec<credentials::AccountSummary>> {
+    credentials::list().await
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccountSwitchResult {
+    account: Option<AccountInfo>,
+    error: Option<String>,
+}
+#[tauri::command]
+pub async fn switch_microsoft_account(uuid: String) -> ResultT<AccountSwitchResult> {
+    {
+        let mut s = state().lock().await;
+        if s.pending.is_some() {
+            return Err("请先完成或取消当前登录".into());
+        }
+        credentials::select(uuid).await?;
+        s.generation += 1;
+        s.session = None;
+    }
+    Ok(match restore_microsoft_account().await {
+        Ok(account) => AccountSwitchResult {
+            account,
+            error: None,
+        },
+        Err(error) => AccountSwitchResult {
+            account: None,
+            error: Some(error),
+        },
+    })
+}
+#[tauri::command]
 pub async fn microsoft_account() -> Option<AccountInfo> {
     state().lock().await.session.as_ref().map(info)
 }
@@ -756,7 +788,7 @@ pub async fn launch_identity() -> ResultT<LaunchIdentity> {
     })
 }
 
-fn png_data(bytes: &[u8], kind: &str) -> ResultT<String> {
+pub(crate) fn png_data(bytes: &[u8], kind: &str) -> ResultT<String> {
     if bytes.len() > 2 * 1024 * 1024 || bytes.len() < 24 {
         return Err("图片必须是小于 2 MB 的 PNG 文件".into());
     }

@@ -394,13 +394,29 @@ async fn download(
             .map_err(|e| e.to_string())?;
     }
     let name = dest.file_name().ok_or("下载目标无效")?.to_string_lossy();
-    let temporary = dest.with_file_name(format!(
-        ".{name}.ccl-{}-{}.part",
-        std::process::id(),
-        TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)
-    ));
-    let _cleanup = jobs::CleanupPath::file(temporary.clone());
-    let mirrored = if let Some(expected) = sha {
+    let resumable =
+        sha.filter(|hash| hash.len() == 40 && hash.bytes().all(|c| c.is_ascii_hexdigit()));
+    if sha.is_some() && resumable.is_none() {
+        return Err("下载文件的 SHA-1 校验值无效".into());
+    }
+    let temporary = if let Some(expected) = resumable {
+        dest.with_file_name(format!(
+            ".{name}.ccl-{}.part",
+            expected.to_ascii_lowercase()
+        ))
+    } else {
+        dest.with_file_name(format!(
+            ".{name}.ccl-{}-{}.part",
+            std::process::id(),
+            TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)
+        ))
+    };
+    // Digest-addressed partials survive cancellation and process exit; never
+    // retain unverified files where the caller has no trusted digest.
+    let _cleanup = resumable
+        .is_none()
+        .then(|| jobs::CleanupPath::file(temporary.clone()));
+    let mirrored = if let Some(expected) = resumable {
         let mut candidates = vec![(url.to_string(), false)];
         if let Some(mirror) = mirror_url(url) {
             candidates.push((mirror, true));
@@ -411,8 +427,13 @@ async fn download(
         let mut selected = None;
         let mut errors = Vec::new();
         for (candidate, is_mirror) in candidates {
-            let _ = tokio::fs::remove_file(&temporary).await;
-            match transfer::download(
+            if fs::symlink_metadata(&temporary).is_ok_and(|meta| meta.file_type().is_file())
+                && file_sha1(&temporary).is_ok_and(|hash| hash.eq_ignore_ascii_case(expected))
+            {
+                selected = Some(is_mirror);
+                break;
+            }
+            match transfer::download_resume(
                 client,
                 &candidate,
                 &temporary,
@@ -426,10 +447,13 @@ async fn download(
                         selected = Some(is_mirror);
                         break;
                     }
-                    Ok(_) => errors.push(format!(
-                        "{}：文件校验失败",
-                        if is_mirror { "镜像" } else { "官方" }
-                    )),
+                    Ok(_) => {
+                        let _ = tokio::fs::remove_file(&temporary).await;
+                        errors.push(format!(
+                            "{}：文件校验失败",
+                            if is_mirror { "镜像" } else { "官方" }
+                        ));
+                    }
                     Err(e) => errors.push(e),
                 },
                 Err(e) => errors.push(format!("{}：{e}", if is_mirror { "镜像" } else { "官方" })),
@@ -947,6 +971,72 @@ fn open_game_log(game_dir: String, version: String, log_name: Option<String>) ->
     Ok(())
 }
 #[tauri::command]
+fn apply_offline_skin(
+    game_dir: String,
+    version: String,
+    username: String,
+    skin: String,
+) -> ResultT<()> {
+    use base64::{engine::general_purpose::STANDARD, Engine};
+    version_id(&version)?;
+    if username.is_empty()
+        || username.len() > 16
+        || !username
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || c == b'_')
+    {
+        return Err("玩家名须为 1–16 位英文字母、数字或下划线".into());
+    }
+    let encoded = skin
+        .strip_prefix("data:image/png;base64,")
+        .ok_or("皮肤数据无效")?;
+    if encoded.len() > 3 * 1024 * 1024 {
+        return Err("皮肤图片过大".into());
+    }
+    let bytes = STANDARD.decode(encoded).map_err(|_| "皮肤数据无效")?;
+    auth::png_data(&bytes, "skin")?;
+    let dir = root(&game_dir)?;
+    let metadata = loaders::version_json(&dir, &version)?;
+    let runtime = loaders::runtime_dir(&dir, &version, &metadata);
+    fs::create_dir_all(&runtime).map_err(|e| e.to_string())?;
+    let mut folder = runtime;
+    for part in ["CustomSkinLoader", "LocalSkin", "skins"] {
+        folder.push(part);
+        match fs::symlink_metadata(&folder) {
+            Ok(meta) if !meta.file_type().is_dir() => return Err("皮肤目录不是普通目录".into()),
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                fs::create_dir(&folder).map_err(|e| e.to_string())?
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
+    let target = folder.join(format!("{username}.png"));
+    if let Ok(meta) = fs::symlink_metadata(&target) {
+        if !meta.file_type().is_file() {
+            return Err("皮肤目标不是普通文件".into());
+        }
+    }
+    let temporary = folder.join(format!(
+        ".ccl-skin-{}-{}.tmp",
+        std::process::id(),
+        TEMP_FILE_ID.fetch_add(1, Ordering::Relaxed)
+    ));
+    let _cleanup = jobs::CleanupPath::file(temporary.clone());
+    {
+        use std::io::Write;
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .map_err(|e| e.to_string())?;
+        f.write_all(&bytes).map_err(|e| e.to_string())?;
+        f.flush().map_err(|e| e.to_string())?;
+    }
+    fs::rename(&temporary, &target).map_err(|e| format!("无法保存离线皮肤：{e}"))?;
+    Ok(())
+}
+#[tauri::command]
 async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<String> {
     version_id(&options.version)?;
     if options.username.is_empty()
@@ -1272,6 +1362,7 @@ fn main() {
             worlds::delete_world,
             install_version,
             launch_game,
+            apply_offline_skin,
             memory::memory_info,
             open_game_log,
             open_version_folder,
@@ -1281,6 +1372,8 @@ fn main() {
             auth::cancel_microsoft_login,
             auth::logout_microsoft,
             auth::microsoft_account,
+            auth::list_microsoft_accounts,
+            auth::switch_microsoft_account,
             auth::restore_microsoft_account,
             auth::get_appearance,
             auth::preview_texture,
@@ -1324,6 +1417,71 @@ mod download_tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn offline_skin_writes_only_to_the_selected_instance() {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let base =
+            std::env::temp_dir().join(format!("ccl-offline-skin-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&base);
+        let version_dir = base.join("versions/one");
+        fs::create_dir_all(&version_dir).unwrap();
+        fs::write(version_dir.join("one.json"), r#"{"cclInstance":true}"#).unwrap();
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 64, 64);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            let mut writer = encoder.write_header().unwrap();
+            writer.write_image_data(&vec![255; 64 * 64 * 4]).unwrap();
+        }
+        let skin = format!("data:image/png;base64,{}", STANDARD.encode(&bytes));
+        let dir = base.to_string_lossy().to_string();
+        apply_offline_skin(dir.clone(), "one".into(), "Player".into(), skin.clone()).unwrap();
+        let path = base.join("instances/one/CustomSkinLoader/LocalSkin/skins/Player.png");
+        assert_eq!(fs::read(path).unwrap(), bytes);
+        assert!(
+            apply_offline_skin(dir.clone(), "one".into(), "../bad".into(), skin.clone()).is_err()
+        );
+        assert!(apply_offline_skin(dir, "missing".into(), "Player".into(), skin).is_err());
+        fs::remove_dir_all(base).unwrap();
+    }
+
+    #[tokio::test]
+    async fn verified_game_file_resumes_existing_partial_and_publishes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 1024];
+            let n = socket.read(&mut buffer).await.unwrap();
+            assert!(String::from_utf8_lossy(&buffer[..n])
+                .to_ascii_lowercase()
+                .contains("range: bytes=5-"));
+            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 5-9/10\r\nConnection: close\r\n\r\n67890").await.unwrap();
+        });
+        let root = std::env::temp_dir().join(format!("ccl-resume-verified-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&root).unwrap();
+        let hash = format!("{:x}", Sha1::digest(b"1234567890"));
+        let dest = root.join("client.jar");
+        let partial = root.join(format!(".client.jar.ccl-{hash}.part"));
+        fs::write(&partial, b"12345").unwrap();
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        download(
+            &client,
+            &format!("http://{address}/file"),
+            &dest,
+            Some(&hash),
+            false,
+        )
+        .await
+        .unwrap();
+        assert_eq!(fs::read(&dest).unwrap(), b"1234567890");
+        assert!(!partial.exists());
+        server.await.unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[tokio::test]
     async fn cancelling_a_download_releases_shared_file_for_another_job() {

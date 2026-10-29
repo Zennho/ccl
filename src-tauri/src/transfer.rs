@@ -2,22 +2,62 @@ use crate::ResultT;
 use std::{path::Path, time::Duration};
 use tokio::io::{AsyncSeekExt, AsyncWriteExt};
 
-// The caller owns the temporary file and must verify a trusted digest before
-// publishing it. A partial file is reused only within this invocation.
+// Callers must verify a trusted digest before publishing any resumed file.
 pub async fn download(
     client: &reqwest::Client,
     url: &str,
     path: &Path,
     max_bytes: u64,
+    progress: impl FnMut(u64, u64),
+) -> ResultT<()> {
+    download_inner(client, url, path, max_bytes, false, progress).await
+}
+
+pub async fn download_resume(
+    client: &reqwest::Client,
+    url: &str,
+    path: &Path,
+    max_bytes: u64,
+    progress: impl FnMut(u64, u64),
+) -> ResultT<()> {
+    download_inner(client, url, path, max_bytes, true, progress).await
+}
+
+async fn download_inner(
+    client: &reqwest::Client,
+    url: &str,
+    path: &Path,
+    max_bytes: u64,
+    resume: bool,
     mut progress: impl FnMut(u64, u64),
 ) -> ResultT<()> {
+    if resume {
+        match tokio::fs::symlink_metadata(path).await {
+            Ok(meta) if !meta.file_type().is_file() || meta.len() > max_bytes => {
+                return Err("续传文件无效或超过大小限制".into())
+            }
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(format!("无法读取续传文件：{e}")),
+        }
+    }
     let mut file = tokio::fs::OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .create_new(!resume)
+        .create(resume)
         .open(path)
         .await
         .map_err(|e| format!("无法创建临时文件：{e}"))?;
-    let mut current = 0u64;
+    let mut current = if resume {
+        file.metadata().await.map_err(|e| e.to_string())?.len()
+    } else {
+        0
+    };
+    if current > 0 {
+        file.seek(std::io::SeekFrom::Start(current))
+            .await
+            .map_err(|e| e.to_string())?;
+    }
     let mut expected_total = None;
     let mut last_error = String::new();
     for attempt in 0..3 {
@@ -182,6 +222,34 @@ mod tests {
             assert!(seen[1].to_ascii_lowercase().contains("range: bytes=5-"));
             fs::remove_file(path).unwrap();
         }
+    }
+    #[tokio::test]
+    async fn resumes_existing_partial_after_restart() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buf = [0; 2048];
+            let size = socket.read(&mut buf).await.unwrap();
+            let request = String::from_utf8_lossy(&buf[..size]).to_ascii_lowercase();
+            assert!(request.contains("range: bytes=5-"));
+            socket.write_all(b"HTTP/1.1 206 Partial Content\r\nContent-Length: 5\r\nContent-Range: bytes 5-9/10\r\nConnection: close\r\n\r\n67890").await.unwrap();
+        });
+        let path =
+            std::env::temp_dir().join(format!("ccl-transfer-existing-{}", std::process::id()));
+        fs::write(&path, b"12345").unwrap();
+        download_resume(
+            &reqwest::Client::builder().no_proxy().build().unwrap(),
+            &format!("http://{address}/file"),
+            &path,
+            100,
+            |_, _| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"1234567890");
+        server.await.unwrap();
+        fs::remove_file(path).unwrap();
     }
     #[tokio::test]
     async fn rejects_invalid_partial_response_and_oversized_file() {

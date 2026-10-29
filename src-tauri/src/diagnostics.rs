@@ -150,6 +150,47 @@ fn classify(text: &str, source: &'static str) -> Diagnosis {
             ],
         )
     } else if contains(&[
+        "java.nio.file.filesystemexception: no space left on device",
+        "no space left on device",
+        "there is not enough space on the disk",
+        "there is insufficient space on the disk",
+    ]) {
+        (
+            "disk_space",
+            "磁盘可用空间可能不足",
+            vec![
+                "检查游戏目录和系统临时目录所在磁盘的可用空间。",
+                "释放足够空间后重试；清理前请保留存档和模组。",
+            ],
+        )
+    } else if contains(&[
+        "java.nio.file.accessdeniedexception:",
+        "java.io.filenotfoundexception: access is denied",
+        "permission denied: unable to open file",
+    ]) {
+        (
+            "file_access",
+            "游戏文件可能无法访问",
+            vec![
+                "检查游戏目录是否可写，以及安全软件是否拦截了相关文件。",
+                "关闭占用文件的程序后重试；必要时查看日志中的具体路径。",
+            ],
+        )
+    } else if contains(&[
+        "java.lang.unsatisfiedlinkerror",
+        "wrong elf class",
+        "wrong architecture",
+        "can't load amd 64-bit .dll on a ia 32-bit platform",
+    ]) {
+        (
+            "native_library",
+            "Java 或原生库可能与系统架构不匹配",
+            vec![
+                "确认所选 Java 与操作系统架构匹配，并检查该版本的原生库是否完整。",
+                "若近期更换了 Java 或图形模组，可恢复原设置后重试。",
+            ],
+        )
+    } else if contains(&[
         "glfw error 65542",
         "glfw error 65543",
         "glfw error 65544",
@@ -256,6 +297,16 @@ mod tests {
                 "java.util.zip.ZipException: zip END header not found",
                 "corrupt_file",
             ),
+            ("java.io.IOException: No space left on device", "disk_space"),
+            (
+                "java.nio.file.AccessDeniedException: /private/file",
+                "file_access",
+            ),
+            (
+                "java.lang.UnsatisfiedLinkError: wrong ELF class",
+                "native_library",
+            ),
+            ("disk space: 10 GB", "unknown"),
             ("Game exited with code 1", "unknown"),
             (
                 "[INFO] Java 21 installed, Iris enabled, memory 4 GB",

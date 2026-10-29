@@ -3,25 +3,31 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
+const { IDBFactory } = require('fake-indexeddb');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot({preference='microsoft', known=false, restore, logout, launch, appearance} = {}) {
+function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w = dom.window;
   const calls = [];
+  if(database) w.indexedDB=database;
   w.localStorage.setItem('ccl-settings', JSON.stringify({accountMode:preference,accountKnown:known,selected:installed.id,gameDir:'/game'}));
+  if(instanceSettings)w.localStorage.setItem('ccl-instance-launch-settings',JSON.stringify(instanceSettings));
   w.setInterval=()=>0; w.__icons = {}; w.createIcons = () => {}; w.isTauri = () => true;
   w.getCurrentWindow = () => ({}); w.listen = async () => () => {};
-  w.openDialog = async () => null; w.saveDialog = async () => null;
+  w.openDialog = async () => selectedSkin ? '/skin.png' : null; w.saveDialog = async () => null;
   w.invoke = async (name,args={}) => {
     calls.push({name,args});
     if(name==='configure_proxy')return;
-    if(name==='list_versions'||name==='installed_versions')return [installed];
+    if(name==='list_versions'||name==='installed_versions')return versions;
     if(name==='restore_microsoft_account')return restore ? restore() : null;
     if(name==='logout_microsoft')return logout ? logout() : undefined;
     if(name==='launch_game')return launch ? launch(args) : undefined;
     if(name==='get_appearance')return appearance ? appearance() : {skin:null,model:'classic',capes:[]};
+    if(name==='preview_texture')return selectedSkin;
+    if(name==='list_microsoft_accounts')return savedAccounts || [];
+    if(name==='switch_microsoft_account')return switchAccount ? switchAccount(args.uuid) : null;
   };
   w.appVersion = require('../package.json').version;
   w.eval(fs.readFileSync(path.join(__dirname,'../src/job-manager.js'),'utf8').replace('export function createJobManager','function createJobManager'));
@@ -186,4 +192,77 @@ test('an expired backend session provides an account recovery action', async () 
     app.click('[data-action="launch-account"]');
     assert.ok(app.w.document.querySelector('[data-action="logout-microsoft"]'));
   } finally {app.close();}
+});
+
+
+test('avatar follows active account skin and handles loading errors', async () => {
+ const app=boot({known:true,database:new IDBFactory(),selectedSkin:'data:image/png;base64,local',restore:()=>Promise.resolve({name:'RealPlayer',uuid:'abc'}),appearance:()=>Promise.resolve({skin:'data:image/png;base64,online',model:'classic',capes:[]})});
+ try {
+  await tick();await tick();
+  let avatar=app.w.document.querySelector('.avatar');
+  assert.equal(avatar.querySelector('.avatar-face').src,'data:image/png;base64,online');
+  assert.equal(avatar.querySelector('.avatar-overlay').src,'data:image/png;base64,online');
+  avatar.querySelector('.avatar-face').dispatchEvent(new app.w.Event('load'));
+  assert.ok(avatar.classList.contains('has-skin'));
+  app.click('[data-page="account"]');app.click('[data-action="choose-skin"]');await tick();
+  assert.equal(avatar.querySelector('.avatar-face').src,'data:image/png;base64,online','online identity keeps the applied account skin');
+  app.click('[data-action="use-offline"]');
+  assert.equal(avatar.querySelector('.avatar-face').src,'data:image/png;base64,local');
+  avatar.querySelector('.avatar-face').dispatchEvent(new app.w.Event('error'));
+  assert.ok(!avatar.classList.contains('has-skin'));
+  assert.equal(avatar.querySelector('.avatar-fallback').textContent,'P');
+  app.click('[data-action="clear-skin"]');
+  assert.equal(avatar.querySelector('.avatar-face'),null);
+ } finally {app.close();}
+});
+
+test('offline skin preview is restored after reopening and can be cleared', async () => {
+ const database=new IDBFactory();
+ const first=boot({preference:'offline',database,selectedSkin:'data:image/png;base64,local'});
+ try {await tick();first.click('[data-page="account"]');first.click('[data-action="choose-skin"]');await tick();await tick();} finally {first.close();}
+ const second=boot({preference:'offline',database});
+ try {await tick();await tick();assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,local');second.click('[data-page="account"]');second.click('[data-action="clear-skin"]');await tick();await tick();} finally {second.close();}
+ const third=boot({preference:'offline',database});
+ try {await tick();await tick();assert.equal(third.w.document.querySelector('.avatar-face'),null);} finally {third.close();}
+});
+
+
+test('instance launch settings are isolated per version and can return to global defaults', async () => {
+ const other={id:'1.21.1',name:'1.21.1',kind:'正式版',installed:true};
+ const app=boot({preference:'offline',versions:[installed,other]});
+ try {
+  await tick();app.click('[data-page="settings"]');
+  const form=app.w.document.querySelector('#instance-settings-form');
+  form.elements.javaPath.value='/java/one';form.elements.memoryMode.value='manual';form.elements.memory.value='6144';form.elements.jvmArgs.value='-Dexample=true';form.elements.gameArgs.value='--width 1200';
+  form.dispatchEvent(new app.w.Event('submit',{bubbles:true,cancelable:true}));
+  const stored=JSON.parse(app.w.localStorage.getItem('ccl-instance-launch-settings'));
+  assert.equal(stored[JSON.stringify(['/game','1.20.1'])].javaPath,'/java/one');
+  app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+  const first=app.calls.findLast(c=>c.name==='launch_game').args.options;
+  assert.equal(first.javaPath,'/java/one');assert.equal(first.memory,6144);assert.equal(first.jvmArgs,'-Dexample=true');
+  app.click('[data-action="close-launch-view"]');app.click('[data-page="versions"]');app.click('[data-select="1.21.1"]');app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+  const second=app.calls.findLast(c=>c.name==='launch_game').args.options;
+  assert.equal(second.javaPath,'java');assert.notEqual(second.memory,6144);
+  app.click('[data-action="close-launch-view"]');app.click('[data-page="versions"]');app.click('[data-select="1.20.1"]');app.click('[data-page="settings"]');app.click('[data-action="reset-instance-settings"]');
+  assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-instance-launch-settings'))[JSON.stringify(['/game','1.20.1'])],undefined);
+ } finally {app.close();}
+});
+
+
+test('switches between saved online accounts and refreshes their skins', async () => {
+ let current='one';const accounts=[{uuid:'one',name:'First'},{uuid:'two',name:'Second'}];
+ const app=boot({known:true,savedAccounts:accounts,restore:()=>({uuid:'one',name:'First'}),switchAccount:uuid=>{current=uuid;return {account:{uuid,name:'Second'},error:null};},appearance:()=>({skin:`data:image/png;base64,${current}`,model:'classic',capes:[]})});
+ try {await tick();await tick();app.click('[data-page="account"]');await tick();app.click('[data-switch-account="two"]');await tick();await tick();assert.equal(app.w.document.querySelector('.profile strong').textContent,'Second');assert.equal(app.w.document.querySelector('.avatar-face').src,'data:image/png;base64,two');assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-settings')).accountMode,'microsoft');assert.doesNotMatch(app.w.localStorage.getItem('ccl-settings'),/token/);} finally {app.close();}
+});
+
+test('applies chosen offline skin to an instance and syncs it at launch', async () => {
+ const app=boot({preference:'offline',database:new IDBFactory(),selectedSkin:'data:image/png;base64,local'});
+ try {await tick();app.click('[data-page="account"]');app.click('[data-action="choose-skin"]');await tick();app.click('[data-action="apply-offline-skin"]');await tick();assert.equal(app.calls.findLast(c=>c.name==='apply_offline_skin').args.version,'1.20.1');app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();const calls=app.calls.filter(c=>['apply_offline_skin','launch_game'].includes(c.name));assert.equal(calls.map(c=>c.name).join(','),'apply_offline_skin,apply_offline_skin,launch_game');} finally {app.close();}
+});
+
+
+test('account switch failures preserve the previous session or expose a retry', async () => {
+ const accounts=[{uuid:'one',name:'First'},{uuid:'two',name:'Second'}];let fail=true;
+ const app=boot({known:true,savedAccounts:accounts,restore:()=>({uuid:'one',name:'First'}),switchAccount:()=>{if(fail){fail=false;throw new Error('凭据库已锁定');}return {account:null,error:'网络不可用'};},appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
+ try {await tick();await tick();app.click('[data-page="account"]');await tick();app.click('[data-switch-account="two"]');await tick();assert.equal(app.w.document.querySelector('.profile strong').textContent,'First');app.click('[data-switch-account="two"]');await tick();assert.equal(app.w.document.querySelector('.profile strong').textContent,'Second');assert.match(app.w.document.querySelector('.identity-card').textContent,/网络不可用/);assert.ok(app.w.document.querySelector('[data-action="retry-account-restore"]'));} finally {app.close();}
 });
