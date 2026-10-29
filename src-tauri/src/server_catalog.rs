@@ -7,7 +7,7 @@ const CATALOG_URL: &str =
 
 #[tauri::command]
 pub async fn public_servers() -> ResultT<Value> {
-    let response = http_client()?
+    let mut response = http_client()?
         .get(CATALOG_URL)
         .timeout(Duration::from_secs(35))
         .send()
@@ -22,13 +22,16 @@ pub async fn public_servers() -> ResultT<Value> {
         })?;
     if response
         .content_length()
-        .is_some_and(|length| length > 4_000_000)
+        .is_some_and(|length| length > 32_000_000)
     {
         return Err("服务器目录过大".into());
     }
-    let bytes = response.bytes().await.map_err(|_| "读取服务器目录失败")?;
-    if bytes.len() > 4_000_000 {
-        return Err("服务器目录过大".into());
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(|_| "读取服务器目录失败")? {
+        if bytes.len().saturating_add(chunk.len()) > 32_000_000 {
+            return Err("服务器目录过大".into());
+        }
+        bytes.extend_from_slice(&chunk);
     }
     let data: Value = serde_json::from_slice(&bytes).map_err(|_| "服务器目录格式无效")?;
     if data["schemaVersion"].as_u64() != Some(1)
