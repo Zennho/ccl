@@ -1,15 +1,18 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 mod archive;
 mod auth;
+mod backups;
 mod content;
 mod credentials;
 mod diagnostics;
+mod game_profile;
 mod java;
 mod jobs;
 mod lan;
 mod lan_core;
 mod loaders;
 mod memory;
+mod modcheck;
 mod overview;
 mod server_catalog;
 mod source_probe;
@@ -18,6 +21,7 @@ mod transfer;
 mod update;
 mod version_manager;
 mod window_detect;
+mod worlds;
 use futures_util::{stream, StreamExt, TryStreamExt};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1139,6 +1143,8 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
         .spawn()
         .map_err(|e| format!("无法启动 Java：{e}。请检查 Java 路径和版本。"))?;
     overview::record_launch(&dir, &options.version);
+    game_profile::started(&dir, &options.version);
+    let profile_started = std::time::Instant::now();
     let path_text = log_path.to_string_lossy().to_string();
     let event_path = path_text.clone();
     let version = options.version;
@@ -1199,6 +1205,7 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
         if let Ok(mut file) = fs::OpenOptions::new().append(true).open(&log_path) {
             let _ = writeln!(file, "\nCCL: 进程退出状态 {:?}", code);
         }
+        game_profile::finished(&dir, &version, profile_started.elapsed().as_secs(), success);
         let diagnosis = if success {
             None
         } else {
@@ -1252,6 +1259,17 @@ fn main() {
             list_versions,
             installed_versions,
             overview::instance_overview,
+            game_profile::play_stats,
+            game_profile::list_game_screenshots,
+            game_profile::game_screenshot,
+            game_profile::open_screenshot_folder,
+            backups::list_backups,
+            backups::create_backup,
+            backups::restore_backup,
+            backups::delete_backup,
+            worlds::list_worlds,
+            worlds::open_world_folder,
+            worlds::delete_world,
             install_version,
             launch_game,
             memory::memory_info,
@@ -1291,6 +1309,7 @@ fn main() {
             content::shader_environment,
             content::list_mods,
             content::check_mod_updates,
+            modcheck::check_mod_conflicts,
             content::set_mod_enabled,
             content::remove_mod,
             content::install_mod,

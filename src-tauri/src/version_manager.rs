@@ -22,6 +22,23 @@ fn running() -> &'static Mutex<RunState> {
 fn normalized(path: &Path) -> PathBuf {
     fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
+pub struct DirectoryReservation(PathBuf);
+impl Drop for DirectoryReservation {
+    fn drop(&mut self) {
+        if let Ok(mut state) = running().lock() {
+            state.deleting.remove(&self.0);
+        }
+    }
+}
+pub fn reserve_directory(dir: &Path) -> ResultT<DirectoryReservation> {
+    let path = normalized(dir);
+    let mut state = running().lock().map_err(|_| "游戏状态不可用")?;
+    if state.deleting.contains(&path) || state.games.keys().any(|(game_dir, _)| *game_dir == path) {
+        return Err("该游戏目录有正在运行的游戏或管理操作，请先退出游戏".into());
+    }
+    state.deleting.insert(path.clone());
+    Ok(DirectoryReservation(path))
+}
 pub struct RunningVersion((PathBuf, String));
 pub fn track_launch(dir: &Path, version: &str) -> ResultT<RunningVersion> {
     let key = (normalized(dir), version.to_owned());
@@ -201,6 +218,18 @@ mod tests {
             serde_json::to_vec(&metadata).unwrap(),
         )
         .unwrap();
+    }
+    #[test]
+    fn directory_reservation_excludes_running_games_and_new_launches() {
+        let dir = fixture();
+        let running = track_launch(&dir, "one").unwrap();
+        assert!(reserve_directory(&dir).is_err());
+        drop(running);
+        let reservation = reserve_directory(&dir).unwrap();
+        assert!(track_launch(&dir, "other").is_err());
+        drop(reservation);
+        assert!(track_launch(&dir, "other").is_ok());
+        let _ = std::fs::remove_dir_all(dir);
     }
     #[tokio::test]
     async fn isolation_switch_keeps_data_and_respects_running_games_and_packs() {

@@ -12,6 +12,9 @@ function boot(options={}){
  w.invoke=(name,args={})=>{calls.push({name,args});
   if(name==='list_versions'||name==='installed_versions')return Promise.resolve([{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}]);
   if(name==='list_mods')return Promise.resolve([]);
+  if(name==='list_worlds')return Promise.resolve([{folder:'world1',name:'我的世界',gameVersion:'1.20.1',lastPlayed:1760000000000}]);
+  if(name==='list_backups')return Promise.resolve([{id:'b-1',scope:'world',world:'world1',created:1760000000,size:4096}]);
+  if(name==='check_mod_conflicts')return Promise.resolve({checked:2,unknown:1,issues:[{kind:'missing',message:'缺少依赖 example',files:['a.jar']}]});
   if(name==='content_categories')return Promise.resolve([{id:'adventure',name:'Adventure'}]);
   if(name==='instance_overview')return Promise.resolve({gameVersion:'1.20.1',loader:'fabric',isolated:true,mods:5,resourcePacks:2,shaderPacks:1,sizeBytes:10485760,sizeIncomplete:false,lastLaunched:1760000000});
   if(name==='list_local_packs')return options.listPacks?options.listPacks(args):Promise.resolve(options.packs||[]);
@@ -138,4 +141,22 @@ test('loads instance overview on demand and shows directory scope',async()=>{
   app.click('[data-instance-overview="1.20.1"]');await tick();const dialog=app.w.document.querySelector('.instance-dialog');assert.match(dialog.textContent,/1.20.1/);assert.match(dialog.textContent,/fabric/);assert.match(dialog.textContent,/10.0 MB/);assert.match(dialog.textContent,/独立游戏目录/);assert.equal(app.calls.findLast(c=>c.name==='instance_overview').args.version,'1.20.1');
   app.click('[data-action=close-instance]');assert.equal(app.w.document.querySelector('.instance-dialog'),null);
  } finally {app.close();}
+});
+
+
+test('instance backup and world management use the selected version and confirm destructive actions',async()=>{
+ const app=boot();try {
+  await tick();app.click('[data-page=versions]');app.click('[data-manage-worlds="1.20.1"]');await tick();
+  assert.match(app.w.document.querySelector('.manage-dialog').textContent,/我的世界/);
+  app.click('[data-world-backup="0"]');await tick();await tick();let call=app.calls.findLast(c=>c.name==='create_backup');assert.equal(call.args.world,'world1');assert.equal(call.args.scope,'world');assert.equal(call.args.version,'1.20.1');
+  app.click('[data-manage-delete="0"]');assert.match(app.w.document.querySelector('.manage-confirm').textContent,/自动备份/);assert.equal(app.calls.filter(c=>c.name==='delete_world').length,0);
+  app.click('[data-action=manage-confirm]');await tick();await tick();assert.equal(app.calls.findLast(c=>c.name==='delete_world').args.folder,'world1');
+  app.click('[data-action=switch-backups]');await tick();assert.match(app.w.document.querySelector('.manage-dialog').textContent,/存档备份/);
+  app.click('[data-manage-restore="0"]');assert.match(app.w.document.querySelector('.manage-confirm').textContent,/自动备份整个实例/);app.click('[data-action=manage-confirm]');await tick();await tick();call=app.calls.findLast(c=>c.name==='restore_backup');assert.equal(call.args.backupId,'b-1');assert.equal(call.args.gameDir,'/game');
+  app.click('[data-action=create-instance-backup]');await tick();await tick();assert.equal(app.calls.findLast(c=>c.name==='create_backup').args.scope,'instance');
+ } finally {app.close();}
+});
+
+test('reports mod conflict findings and unknown files',async()=>{
+ const app=boot();try {await tick();app.click('[data-page=content]');await tick();app.click('[data-action=check-mod-conflicts]');await tick();assert.match(app.w.document.querySelector('#mod-conflict-report').textContent,/缺少依赖 example/);assert.match(app.w.document.querySelector('#mod-conflict-report').textContent,/1 个文件无法识别/);assert.equal(app.calls.findLast(c=>c.name==='check_mod_conflicts').args.version,'1.20.1');}finally{app.close();}
 });
