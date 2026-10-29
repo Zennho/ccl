@@ -9,5 +9,5 @@
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/react/**/*.ts", "src/react/**/*.tsx"]
+  "include": ["src/react/**/*.ts", "src/react/**/*.tsx", "src/appearance-preview.ts", "src/job-manager.ts"]
 }

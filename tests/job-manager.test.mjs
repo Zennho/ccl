@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createJobManager } from '../src/job-manager.js';
+import { createJobManager } from '../src/job-manager.ts';
 
 const tick = () => new Promise(resolve => setImmediate(resolve));
 function setup(invoke = async () => {}, onJobFinished = async () => {}) {

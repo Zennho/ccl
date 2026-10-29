@@ -32,7 +32,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch, app
     if(name==='switch_microsoft_account')return switchAccount ? switchAccount(args.uuid) : null;
   };
   w.appVersion = require('../package.json').version;
-  w.eval(fs.readFileSync(path.join(__dirname,'../src/job-manager.js'),'utf8').replace('export function createJobManager','function createJobManager'));
+  w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
   const source=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');
   w.eval(source);
   const click = selector => { const el=w.document.querySelector(selector);assert.ok(el,selector);el.click(); };

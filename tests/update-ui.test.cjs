@@ -14,7 +14,7 @@ function boot(check, settings={}, version=installed) {
   w.setInterval=(fn,ms)=>{intervals.push({fn,ms});return intervals.length;};
   w.invoke=async(name,args={})=>{calls.push({name,args});if(name==='list_versions'||name==='installed_versions')return [{isolated:false,...version}];if(name==='memory_info')return {totalMb:16384,availableMb:8192,recommendedMb:4096};if(name==='check_launcher_update')return check();};
   w.appVersion=require('../package.json').version;
-  w.eval(fs.readFileSync(path.join(__dirname,'../src/job-manager.js'),'utf8').replace('export function createJobManager','function createJobManager'));
+  w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
   const source=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');
   w.eval(source);
   const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};

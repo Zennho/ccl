@@ -5,22 +5,32 @@ import './custom-theme.css';
 import './launch-screen.css';
 import './management.css';
 import './update.css';
-import { createJobManager } from './job-manager.js';
+import { createJobManager } from './job-manager.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
 import { LanRoomPage } from './react/lan-room.tsx';
 import { PublicServersPage } from './react/public-servers.tsx';
 import { InstanceOverviewDialog } from './react/instance-overview.tsx';
+import { LaunchScreen, CrashDialog } from './react/launch.tsx';
+import { InstallDialog } from './react/install-dialog.tsx';
+import { ArchiveDialog } from './react/archive-dialog.tsx';
+import { DownloadsPage } from './react/downloads.tsx';
+import { SettingsPage } from './react/settings.tsx';
+import { AccountPage } from './react/account.tsx';
+import { ManageDialog } from './react/manage-dialog.tsx';
+import { InstanceThemeDialog } from './react/instance-theme.tsx';
+import { GameProfileDialog } from './react/game-profile.tsx';
+import { ContentPage } from './react/content.tsx';
+import { ContentDialog } from './react/content-dialog.tsx';
+import { Shell } from './react/shell.tsx';
 import { normalizeInstanceSettings, resolveInstanceSettings } from './react/instance-settings-model.ts';
 import { version as appVersion } from '../package.json';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
-import { createIcons, Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks } from 'lucide';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-const icons = { Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks };
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem('ccl-settings') || '{}') || {}; } catch { /* Recover from damaged local settings. */ }
 const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, memoryMode: saved.memoryMode === 'auto' ? 'auto' : saved.memoryMode === 'manual' || saved.memory != null ? 'manual' : 'auto', memoryInfo: null, memoryInfoError: '', memoryInfoLoading: false, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, crashDialog: null, noticeCrash: false, versionQuery: '', accountMode: 'offline', accountKnown: saved.accountKnown===true, accountName: typeof saved.accountName==='string'?saved.accountName:'', accountUuid: typeof saved.accountUuid==='string'?saved.accountUuid:'', accountPreference: saved.accountMode==='offline'?'offline':'microsoft', accountRestoring: false, accountRestoreError: '', restoreAttempt: null, account: null, savedAccounts: [], browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, versionDelete: null, instanceView: null, instanceSettingsView: null, manageView: null, themeView: null, profileView: null, versionDeleting: false, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentSort: 'downloads', contentCategory: '', contentCategories: [], contentCategoriesLoading: false, contentCategoryError: '', contentGameFilter: '', contentLoaderFilter: '', contentEnvironment: '', contentPage: 0, contentHasMore: false, contentLoaded: false, contentError: '', contentResults: [], contentBusy: false, updateState: 'idle', updateInfo: null, updateError: '', updateDismissed: '', localPacks: [], packQuery: '', packLoading: false, packError: '', packWorking: false, packChecking: false, packUpdates: null, packDelete: null, shaderEnv: null, shaderEnvLoading: false, shaderEnvError: '', localMods: [], modQuery: '', modFilter: 'all', selectedMods: new Set(), modWorking: false, modChecking: false, modConflicts: null, modConflictsLoading: false, modUpdates: null, modDelete: null, jobs: [], jobLimit: Math.max(1, Math.min(5, Number(saved.jobLimit) || 3)), installDraft: null };
@@ -48,7 +58,6 @@ function getLaunchSettings(gameDir,version) {
 function effectiveLaunchSettings(gameDir,version) {
  return resolveInstanceSettings(state,getLaunchSettings(gameDir,version));
 }
-function instanceJavaOptions(){return (Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]).filter(j=>typeof j.path==='string' && j.path).map(j=>`<option value="${esc(j.path)}">Java ${esc(j.major || j.version || '')}</option>`).join('');}
 
 function getInstanceTheme(gameDir,version){const entry=instanceThemes[instanceKey(gameDir,version)];return {color:instanceColors.includes(entry?.color)?entry.color:instanceColors[0],description:typeof entry?.description==='string'?entry.description.slice(0,180):'',hasCover:entry?.hasCover===true};}
 function currentInstanceCover(){return instanceCovers.get(instanceKey(state.gameDir,state.selected))||null;}
@@ -61,27 +70,15 @@ async function loadInstanceCover(gameDir,version){
  instanceCoverPending.set(key,pending);return pending;
 }
 function loadInstalledCovers(){for(const v of state.versions.filter(v=>v.installed))void loadInstanceCover(state.gameDir,v.id);}
-function themeDialog(){
- const d=state.themeView;if(!d)return '';const cover=d.preview||(!d.removeCover?instanceCovers.get(instanceKey(d.gameDir,d.version)):null);
- return `<div class="install-overlay"><section class="install-dialog instance-theme-dialog" role="dialog" aria-modal="true" aria-labelledby="instance-theme-title"><div class="install-dialog-head"><div><span class="section-index">INSTANCE / APPEARANCE</span><h2 id="instance-theme-title">实例主题</h2><p>${esc(d.name)} · 为这个版本设置封面、颜色和简介。</p></div><button class="icon-button" data-action="close-instance-theme" aria-label="关闭" ${d.saving?'disabled':''}>${icon('x',19)}</button></div><div class="instance-theme-preview" style="--instance-color:${esc(d.color)}">${cover?`<img src="${esc(cover)}" alt="实例封面预览">`:`<span>${icon('layers-3',28)}</span>`}<strong>${esc(d.name)}</strong></div><div class="theme-image-actions"><label class="outline-btn theme-upload">选择封面<input type="file" data-instance-cover accept="image/png,image/jpeg,image/webp" ${d.saving?'disabled':''}></label><button type="button" class="text-link" data-action="remove-instance-cover" ${d.saving?'disabled':''}>移除封面</button></div><p class="manage-note">选中实例后，封面会用于主页横幅和启动唱片；未设置时使用全局横幅。</p><div class="instance-theme-field"><strong>主题颜色</strong><div class="instance-color-options">${instanceColors.map(color=>`<button type="button" class="instance-color ${d.color===color?'selected':''}" data-instance-color="${color}" style="--instance-color:${color}" aria-label="选择 ${color}" aria-pressed="${d.color===color}"></button>`).join('')}</div></div><label class="instance-theme-field"><strong>实例简介</strong><textarea id="instance-description" maxlength="180" placeholder="记录这个世界或整合包的特色" ${d.saving?'disabled':''}>${esc(d.description)}</textarea></label>${d.error?`<p class="manage-error">${esc(d.error)}</p>`:''}<div class="install-actions"><button class="outline-btn" data-action="close-instance-theme" ${d.saving?'disabled':''}>取消</button><button class="save-button" data-action="save-instance-theme" ${d.saving?'disabled':''}>${d.saving?'保存中…':'保存主题'}</button></div></section></div>`;
-}
-
-function playTime(seconds){const minutes=Math.floor(Math.max(0,Number(seconds)||0)/60),hours=Math.floor(minutes/60);return hours?`${hours} 小时 ${minutes%60} 分钟`:`${minutes} 分钟`;}
-function profileDialog(){
- const d=state.profileView;if(!d)return '';const stats=d.stats||{};
- const date=value=>{const n=Number(value);return value&&Number.isFinite(n)?new Date(n*1000).toLocaleString():'暂无记录';};
- return `<div class="install-overlay"><section class="install-dialog profile-dialog" role="dialog" aria-modal="true" aria-labelledby="profile-title"><div class="install-dialog-head"><div><span class="section-index">INSTANCE / JOURNAL</span><h2 id="profile-title">游戏档案</h2><p>${esc(d.name)} · 游戏进程结束后更新游玩时长。</p></div><button class="icon-button" data-action="close-game-profile" aria-label="关闭">${icon('x',19)}</button></div><div class="profile-stats"><div><small>累计游玩</small><strong>${esc(playTime(stats.seconds))}</strong></div><div><small>启动次数</small><strong>${esc(stats.launches||0)}</strong></div><div><small>最近启动</small><strong>${esc(date(stats.lastStarted))}</strong></div><div><small>上次运行</small><strong>${stats.lastDuration!=null?esc(playTime(stats.lastDuration)):'暂无记录'}</strong></div></div>${d.statsError?`<p class="manage-error">游戏记录读取失败：${esc(d.statsError)}</p>`:''}<div class="profile-gallery-heading"><div><strong>游戏截图</strong><small>${d.isolated?'此实例的截图目录':'共用游戏目录中的截图，可能来自其他版本'}</small></div><div class="profile-gallery-actions"><button class="outline-btn" data-action="refresh-game-profile" ${d.loading?'disabled':''}>刷新</button><button class="outline-btn" data-action="open-screenshot-folder">打开截图文件夹</button></div></div>${d.error?`<p class="manage-error">${esc(d.error)}</p>`:''}<div class="profile-gallery">${d.loading?'<div class="empty-state">正在读取截图…</div>':d.shots.length?d.shots.map((shot,i)=>`<button class="profile-shot" data-profile-shot="${i}" aria-label="查看 ${esc(shot.name)}"><span>加载中…</span><img data-profile-image="${i}" alt="" hidden><small>${esc(shot.name)}</small></button>`).join(''):'<div class="empty-state"><strong>还没有截图</strong><p>在游戏中按 F2 截图后，可在这里查看。</p></div>'}</div><div class="content-pagination"><span>第 ${d.page+1} 页</span><div><button class="outline-btn" data-profile-page="${d.page-1}" ${d.loading||d.page===0?'disabled':''}>上一页</button><button class="outline-btn" data-profile-page="${d.page+1}" ${d.loading||!d.hasMore?'disabled':''}>下一页</button></div></div>${d.preview?`<div class="profile-lightbox" role="dialog" aria-label="截图预览"><button class="icon-button" data-action="close-profile-preview" aria-label="关闭预览">${icon('x',19)}</button><img src="${esc(d.preview.data)}" alt="${esc(d.preview.name)}"><span>${esc(d.preview.name)}</span></div>`:''}<div class="install-actions"><button class="outline-btn" data-action="close-game-profile">关闭</button></div></section></div>`;
-}
 async function loadProfileScreenshots(d){
  const generation=++d.generation,page=d.page;d.loading=true;d.error='';d.shots=[];d.images={};d.imageErrors={};renderOverlay();
  try{const result=await invoke('list_game_screenshots',{gameDir:d.gameDir,version:d.version,page});if(state.profileView!==d||generation!==d.generation)return;d.shots=Array.isArray(result?.items)?result.items:[];d.hasMore=!!result?.hasMore;d.isolated=!!result?.isolated;}
  catch(e){if(state.profileView===d&&generation===d.generation){d.error=String(e);d.hasMore=false;}}
  finally{if(state.profileView===d&&generation===d.generation){d.loading=false;renderOverlay();void hydrateProfileImages(d,generation);}}
 }
-function paintProfileImages(d){for(const [i,url] of Object.entries(d.images)){const image=app.querySelector(`[data-profile-image="${i}"]`);if(image){image.src=url;image.hidden=false;image.previousElementSibling.hidden=true;}}for(const i of Object.keys(d.imageErrors||{})){const image=app.querySelector(`[data-profile-image="${i}"]`);d.imageErrors[i]=true;if(image?.previousElementSibling)image.previousElementSibling.textContent='无法预览';}}
 async function hydrateProfileImages(d,generation){
  if(d.loadingGeneration===generation)return;d.loadingGeneration=generation;
- let next=0;const worker=async()=>{while(next<d.shots.length){const i=next++,shot=d.shots[i];try{const data=await invoke('game_screenshot',{gameDir:d.gameDir,version:d.version,name:shot.name});if(state.profileView!==d||generation!==d.generation)return;if(typeof data!=='string'||!data.startsWith('data:image/png;base64,'))throw new Error('截图不可用');d.images[i]=data;const image=app.querySelector(`[data-profile-image="${i}"]`);if(image){image.src=data;image.hidden=false;image.previousElementSibling.hidden=true;}}catch{if(state.profileView!==d||generation!==d.generation)return;const image=app.querySelector(`[data-profile-image="${i}"]`);if(image?.previousElementSibling)image.previousElementSibling.textContent='无法预览';}}};await Promise.all(Array.from({length:Math.min(3,d.shots.length)},worker));if(d.loadingGeneration===generation)d.loadingGeneration=null;
+ let next=0;const worker=async()=>{while(next<d.shots.length){const i=next++,shot=d.shots[i];try{const data=await invoke('game_screenshot',{gameDir:d.gameDir,version:d.version,name:shot.name});if(state.profileView!==d||generation!==d.generation)return;if(typeof data!=='string'||!data.startsWith('data:image/png;base64,'))throw new Error('截图不可用');d.images[i]=data;renderOverlay();}catch{if(state.profileView!==d||generation!==d.generation)return;d.imageErrors[i]=true;renderOverlay();}}};await Promise.all(Array.from({length:Math.min(3,d.shots.length)},worker));if(d.loadingGeneration===generation)d.loadingGeneration=null;
 }
 async function openGameProfile(version){const item=state.versions.find(v=>v.id===version&&v.installed);if(!item)return;const d={version,gameDir:state.gameDir,name:item.name||version,isolated:!!item.isolated,stats:null,statsError:'',page:0,shots:[],images:{},imageErrors:{},generation:0,hasMore:false,loading:true,error:'',preview:null};state.profileView=d;renderOverlay();void invoke('play_stats',{gameDir:d.gameDir,version}).then(stats=>{if(state.profileView===d){d.stats=stats||{};renderOverlay();}}).catch(e=>{if(state.profileView===d){d.statsError=String(e);renderOverlay();}});await loadProfileScreenshots(d);}
 
@@ -146,19 +143,10 @@ function validateThemeImage(file) {
   image.src=url;
  });
 }
-function appearanceSettings() {
- const slider=(key,label,max,unit)=>`<div class="theme-control"><label for="theme-${key}">${label}<output>${theme[key]}${unit}</output></label><input id="theme-${key}" data-theme-setting="${key}" type="range" min="0" max="${max}" value="${theme[key]}"></div>`;
- return `<section class="settings-section theme-settings"><div class="settings-heading"><div class="settings-icon">${icon('layout-grid',20)}</div><div><span class="section-index">APPEARANCE</span><h3>界面外观</h3><p>选择本地图片，自定义启动器的视觉效果。</p></div></div><div class="theme-grid"><div class="theme-card"><div class="theme-card-head"><div><strong>主界面横幅</strong><p>建议使用横向图片。</p></div><span>01</span></div><div class="theme-preview theme-preview-banner" aria-label="横幅预览"><span class="theme-preview-underlay"></span><i></i><div class="theme-preview-banner-image"></div></div><div class="theme-image-actions"><label class="outline-btn theme-upload">选择图片<input type="file" data-theme-image="banner" accept="image/png,image/jpeg,image/webp"></label><button type="button" class="text-link" data-theme-reset="banner">恢复默认</button></div>${slider('bannerOpacity','图片透明度',100,'%')}${slider('bannerFrost','磨砂强度',100,'%')}${slider('bannerBlur','图片模糊',30,' px')}</div><div class="theme-card"><div class="theme-card-head"><div><strong>全局背景</strong><p>图片将显示在整个界面底层。</p></div><span>02</span></div><div class="theme-preview theme-preview-background" aria-label="背景预览"><div></div><i></i></div><div class="theme-image-actions"><label class="outline-btn theme-upload">选择图片<input type="file" data-theme-image="background" accept="image/png,image/jpeg,image/webp"></label><button type="button" class="text-link" data-theme-reset="background">恢复默认</button></div>${slider('backgroundOpacity','图片透明度',100,'%')}${slider('backgroundFrost','磨砂强度',100,'%')}${slider('backgroundBlur','背景模糊',30,' px')}</div></div><p class="theme-footnote">调整即时生效并保存在本设备。支持 PNG、JPEG、WebP，单张图片不超过 20 MB。</p></section>`;
-}
-function memoryInfoMarkup() {
- const info=state.memoryInfo;
- const detail=state.memoryInfoLoading?'正在检测设备内存…':state.memoryInfoError?`内存检测失败：${esc(state.memoryInfoError)}`:info?`设备内存 ${esc(info.totalMb)} MB · 当前可用 ${esc(info.availableMb)} MB<br>${info.recommendedMb?`当前自动上限约 ${esc(info.recommendedMb)} MB`:'可用内存不足，自动模式暂不可用'}`:'尚未检测设备内存';
- return `<div class="memory-info"><span>${detail}</span><button class="text-link" type="button" data-action="refresh-memory-info" ${state.memoryInfoLoading?'disabled':''}>刷新</button></div>`;
-}
 async function refreshMemoryInfo() {
  if(state.memoryInfoLoading || !isTauri()) return;
  state.memoryInfoLoading=true;state.memoryInfoError='';
- const update=()=>{const el=app.querySelector('#memory-info');if(el)el.innerHTML=memoryInfoMarkup();};
+ const update=()=>{if(state.page==='settings' && app.querySelector('#memory-info'))renderSettingsPage();};
  update();
  try {
   const info=await invoke('memory_info');
@@ -189,16 +177,9 @@ function syncMemoryControls() {
  if(instanceValue && instanceSlider && instanceValue.value)instanceSlider.value=instanceValue.value;
 }
 
-function hydrateIcons() { createIcons({ icons }); app.querySelectorAll('svg[data-lucide]').forEach(el => el.removeAttribute('data-lucide')); }
-const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const icon = (name, size = 18) => `<i data-lucide="${name}" width="${size}" height="${size}"></i>`;
-function versionIcon(version, className='row-icon') {
- const badges={Fabric:'F',Forge:'FG',NeoForge:'NF',Quilt:'Q','整合包':'包'};
- const kind=version?.kind || '正式版',badge=badges[kind],instance=version?.id?getInstanceTheme(state.gameDir,version.id):null,cover=version?.id?instanceCovers.get(instanceKey(state.gameDir,version.id)):null;
- return `<div style="--instance-color:${esc(instance?.color || instanceColors[0])}" class="${className} game-version-icon" title="${esc(kind)}" aria-label="${esc(kind)}"><svg viewBox="0 0 32 32" aria-hidden="true"><path fill="#876045" d="M3 9 16 3l13 6v14l-13 7L3 23z"/><path fill="#6c4b38" d="M16 15 29 9v14l-13 7z"/><path fill="#95b86c" d="M3 9 16 3l13 6-13 6z"/><path fill="#779f5d" d="M3 9 16 15v5l-4-2v-2l-3-1v2l-3-2v-2l-3-1z"/><path fill="#658954" d="M16 15 29 9v4l-3 2v-2l-3 2v2l-3 1v-2l-4 2z"/><path fill="#ad8260" d="M6 19h2v2H6zm5 3h2v2h-2z"/><path fill="#8e684a" d="M20 21h2v2h-2zm5-4h2v2h-2z"/></svg>${cover?`<img class="instance-icon-cover" src="${esc(cover)}" alt="">`:''}${badge?`<span class="game-version-badge">${badge}</span>`:''}</div>`;
-}
-function thumbnail(kind, value, fallback, className) {
- return `<div class="${className} thumbnail"><span class="thumbnail-fallback">${icon(fallback,19)}</span>${value ? `<img class="thumbnail-image" alt="" hidden data-thumbnail-kind="${esc(kind)}" data-thumbnail-value="${esc(value)}">` : ''}</div>`;
+function versionVisual(version) {
+ const instance=version?.id?getInstanceTheme(state.gameDir,version.id):null;
+ return {color:instance?.color || instanceColors[0],cover:version?.id?instanceCovers.get(instanceKey(state.gameDir,version.id)):null};
 }
 const thumbnailCache=new Map();
 let thumbnailObserver=null;
@@ -261,34 +242,17 @@ async function restoreLocalSkin() {
  const revision=localSkinRevision;
  try { const skin=await imageStore('get','local-skin');if(revision===localSkinRevision && skin && typeof skin.data==='string' && skin.data.startsWith('data:image/png;base64,') && typeof skin.path==='string' && typeof skin.name==='string'){state.localSkin=skin;state.skinModel=skin.model==='slim'?'slim':'classic';if(state.page==='account')render();else renderChrome();} } catch { /* Local preview is optional when image storage is unavailable. */ }
 }
-function renderAvatar() {
- const avatar=app.querySelector('.avatar');if(!avatar)return;
- const uuid=state.account?.uuid || state.accountUuid;
- const skin=usingOnlineAccount() ? (state.appearance?.skin || cachedAvatars.get(uuid)) : state.localSkin?.data;
- const source=typeof skin==='string' && skin.startsWith('data:image/png;base64,') ? skin : '';
- const name=playerName();avatar.setAttribute('aria-label',`${name} 的头像`);
- if(avatar.dataset.skin===source && avatar.dataset.name===name)return;
- avatar.dataset.skin=source;avatar.dataset.name=name;avatar.classList.remove('has-skin');
- avatar.replaceChildren();const fallback=document.createElement('span');fallback.className='avatar-fallback';fallback.textContent=name.slice(0,1).toUpperCase();avatar.append(fallback);
- if(!source)return;
- for(const layer of ['face','overlay']) {
-  const image=document.createElement('img');image.className=`avatar-skin avatar-${layer}`;image.alt='';image.draggable=false;
-  image.onload=()=>{if(avatar.dataset.skin===source && layer==='face')avatar.classList.add('has-skin');};
-  image.onerror=()=>{if(avatar.dataset.skin===source && layer==='face')avatar.classList.remove('has-skin');};
-  image.src=source;avatar.append(image);
- }
-}
+function renderAvatar() { renderShell(); }
 
 const selected = () => state.versions.find(v => v.id === state.selected);
 function flash(message, kind = '') { state.notice = message; state.noticeKind = kind; state.noticeCrash=false; renderChrome(); }
 function showCrashNotice(crash) {state.crash=crash;state.notice=`游戏 ${crash.version} 异常退出（代码 ${crash.code ?? '未知'}）。`;state.noticeKind='error';state.noticeCrash=true;renderChrome();}
-function shell() {
-  return `<div class="app-shell"><header class="window-bar"><div class="window-drag" data-tauri-drag-region><span class="window-kicker" data-tauri-drag-region>CCL</span><span class="window-separator" data-tauri-drag-region></span><span class="window-title" data-tauri-drag-region>COMPASS CRAFT LAUNCHER</span></div><div class="window-controls"><button data-window="minimize" aria-label="最小化" title="最小化">${icon('minus',15)}</button><button data-window="maximize" aria-label="最大化或还原" title="最大化或还原">${icon('square',12)}</button><button data-window="close" class="window-close" aria-label="关闭" title="关闭">${icon('x',16)}</button></div></header><aside class="sidebar"><div class="brand"><div class="brand-mark" aria-hidden="true"></div><div><strong>CCL<span>.</span></strong><small>COMPASS CRAFT LAUNCHER</small></div></div>
-  <nav class="nav"><button data-page="home" class="${state.page === 'home' ? 'active' : ''}">${icon('layout-grid')}<span>启动游戏</span></button><button data-page="versions" class="${state.page === 'versions' ? 'active' : ''}">${icon('layers-3')}<span>版本管理</span></button><button data-page="content" class="${state.page === 'content' ? 'active' : ''}">${icon('blocks')}<span>模组与资源</span></button><button data-page="multiplayer" class="${state.page === 'multiplayer' ? 'active' : ''}">${icon('globe-2')}<span>多人联机</span></button><button data-page="downloads" class="${state.page === 'downloads' ? 'active' : ''}">${icon('download')}<span>下载任务</span><b class="job-badge">${activeJobCount() || ''}</b></button><button data-page="java" class="${state.page === 'java' ? 'active' : ''}">${icon('monitor')}<span>Java 管理</span></button><button data-page="account" class="${state.page === 'account' ? 'active' : ''}">${icon('user-round')}<span>账户与外观</span></button><button data-page="settings" class="${state.page === 'settings' ? 'active' : ''}">${icon('settings-2')}<span>启动设置</span></button></nav>
-  <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v${esc(appVersion)}</span></div></div></aside>
-  <main class="main"><header class="topbar"><div class="breadcrumbs"><strong>${{home:'启动游戏',versions:'版本管理',content:'模组与资源',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'}[state.page]}</strong></div><div class="top-right"><div id="update-slot" aria-live="polite"></div><div class="avatar">${esc(playerName().slice(0,1).toUpperCase())}</div><div class="profile"><strong>${esc(playerName())}</strong><small>${playerStatus()}</small></div></div></header>
-  <div class="content"></div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
+function shellProps() {
+ const uuid=state.account?.uuid || state.accountUuid;
+ const skin=usingOnlineAccount() ? (state.appearance?.skin || cachedAvatars.get(uuid)) : state.localSkin?.data;
+ return {page:state.page,name:playerName(),status:playerStatus(),skin:typeof skin==='string'&&skin.startsWith('data:image/png;base64,')?skin:'',online:state.online,version:appVersion,installedCount:state.versions.filter(v=>v.installed).length,jobCount:activeJobCount(),updateInfo:state.updateInfo,updateDismissed:state.updateDismissed,notice:state.notice,noticeKind:state.noticeKind,noticeCrash:!!(state.crash&&state.noticeCrash)};
 }
+function renderShell() { if(app.querySelector('.app-shell')) renderer.chrome(Shell,shellProps()); }
 async function refreshLanAddresses() {
  try { state.lanAddresses=await invoke('ipv6_addresses'); if(state.page==='multiplayer') render(); }
  catch(e) { flash(`读取 IPv6 地址失败：${e}`,'error'); }
@@ -309,39 +273,12 @@ async function refreshPublicServers() {
  catch(e) { state.serverError=String(e); }
  finally { state.serverLoading=false;if(state.page==='multiplayer') render(); }
 }
-function versionsPage() {
- const query=state.versionQuery.trim().toLowerCase();
- const list=state.versions.filter(v=>!query || `${v.name || ''} ${v.id} ${v.kind}`.toLowerCase().includes(query));
- return `<div class="page-heading inner-heading"><div><h1>版本管理</h1><p>选择游戏版本，安装加载器或管理游戏文件。</p></div><div class="heading-actions"><button class="outline-btn" data-action="import-game">${icon('folder-open',16)} 导入游戏</button><button class="outline-btn" data-action="refresh" ${state.loading ? 'disabled' : ''}>${icon('refresh-cw',16)} ${state.loading ? '正在获取' : '刷新'}</button></div></div>
- <div class="version-toolbar"><div><strong>游戏版本</strong><span class="count">${list.length}</span></div><label class="version-search"><span class="sr-only">搜索版本</span><input id="version-filter" type="search" placeholder="搜索版本" value="${esc(state.versionQuery)}"></label></div>
- <div class="version-list versions-list">${list.length ? list.map(v => `<div class="version-row">${versionIcon(v)}<div class="row-name"><strong>${esc(v.name || v.id)}</strong><span>${esc(v.kind)} ${v.released ? '· '+esc(v.released) : ''}</span></div><div class="row-state ${v.installed ? 'installed' : ''}"><span></span>${v.installed ? '已安装' : '可安装'}</div>${v.installed ? `<button class="row-button ${state.selected === v.id ? 'selected' : ''}" data-select="${esc(v.id)}">${state.selected === v.id ? '当前版本' : '选择版本'}</button><details class="version-menu"><summary aria-label="${esc(v.name || v.id)} 的更多操作" title="更多操作">${icon('more-horizontal',18)}</summary><div class="version-menu-items"><button data-instance-settings="${esc(v.id)}">${icon('settings-2',15)} 实例设置</button><button data-instance-theme="${esc(v.id)}">${icon('layout-grid',15)} 实例主题</button><button data-game-profile="${esc(v.id)}">${icon('gamepad-2',15)} 游戏档案</button><button data-manage-backups="${esc(v.id)}">${icon('hard-drive',15)} 备份与恢复</button><button data-manage-worlds="${esc(v.id)}">${icon('folder-open',15)} 存档管理</button><button data-instance-overview="${esc(v.id)}">${icon('hard-drive',15)} 实例概览</button><button data-open-version-folder="${esc(v.id)}">${icon('folder-open',15)} 游戏目录</button><button data-export-game="${esc(v.id)}">${icon('download',15)} 导出游戏</button><button data-delete-version="${esc(v.id)}">${icon('x',15)} 删除版本</button>${v.kind === '正式版' ? `<button data-install="${esc(v.id)}">${icon('layers-3',15)} 配置安装</button>` : ''}</div></details>` : v.kind === '正式版' ? `<button class="row-button install-choice" data-install="${esc(v.id)}">${icon('download',14)} 安装</button>` : ''}</div>`).join('') : `<div class="empty-state">${icon('box',27)}<strong>${state.loading ? '正在获取版本列表…' : query ? '没有找到匹配的版本' : '还没有可显示的版本'}</strong><p>${query ? '试试其他关键词。' : '检查网络连接后刷新列表。'}</p></div>`}</div>${state.versionDelete ? `<div class="confirm-overlay"><section class="confirm-box" role="dialog" aria-modal="true" aria-labelledby="delete-version-title"><span class="section-index">REMOVE VERSION</span><h3 id="delete-version-title">删除 ${esc(state.versionDelete.name)}？</h3><p>将删除该版本文件。共用资源、Java、存档和模组会保留；被其他版本依赖的游戏本体无法删除。</p>${state.versionDelete.isolated?'<p>保留的实例数据会留在 instances 目录；重新安装相同整合包前，需要先备份或移除旧目录。</p><label class="archive-check"><input type="checkbox" id="delete-instance-data"><span><strong>同时删除此实例的游戏数据</strong><small>包括该实例的存档、模组和配置，无法恢复。</small></span></label>':''}<div><button class="row-button" data-action="cancel-version-delete" ${state.versionDeleting?'disabled':''}>取消</button><button class="row-button danger-button" data-action="confirm-version-delete" ${state.versionDeleting?'disabled':''}>${state.versionDeleting?'正在删除…':'删除版本'}</button></div></section></div>`:''}`;
-}
 const ADDONS = [
  { id:'fabric-api', title:'Fabric API', desc:'许多 Fabric 模组的基础依赖', loaders:['fabric'] },
  { id:'sodium', title:'Sodium', desc:'改善渲染性能', loaders:['fabric','neoforge'] },
  { id:'jei', title:'Just Enough Items', desc:'查看物品与配方', loaders:['fabric','quilt','forge','neoforge'] },
  { id:'jade', title:'Jade', desc:'查看方块与实体信息', loaders:['fabric','quilt','forge','neoforge'] },
 ];
-function installDialog() {
- const d = state.installDraft; if (!d) return '';
- const choices = [['vanilla','原版','不安装加载器'],['fabric','Fabric','轻量，更新及时'],['quilt','Quilt','基于 Fabric 生态'],['forge','Forge','广泛的模组支持'],['neoforge','NeoForge','Forge 生态分支']];
- return `<div class="install-overlay" data-action="close-install-backdrop"><section class="install-dialog" role="dialog" aria-modal="true" aria-labelledby="install-title"><div class="install-dialog-head"><div><span class="section-index">NEW INSTALL / JAVA EDITION</span><h2 id="install-title">安装 <em>${esc(d.version)}</em></h2><p>先选择运行方式，再按需添加常用模组。</p></div><button class="icon-button" data-action="close-install" aria-label="关闭">${icon('x',19)}</button></div>
- <div class="install-section-heading"><span>01</span><div><strong>模组加载器</strong><small>选择一个与模组兼容的加载器</small></div></div><div class="loader-grid">${choices.map(([id,name,desc]) => `<label class="loader-card ${d.loader===id ? 'chosen' : ''}"><input type="radio" name="draftLoader" value="${id}" ${d.loader===id ? 'checked' : ''}><span class="choice-dot"></span><strong>${name}</strong><small>${desc}</small></label>`).join('')}</div>
- <div class="install-section-heading"><span>02</span><div><strong>附加模组 <small>可选</small></strong><small>从 Modrinth 自动下载兼容版本及必需依赖</small></div></div><div class="addon-grid">${ADDONS.map(a => { const available=a.loaders.includes(d.loader); return `<label class="addon-option ${available ? '' : 'unavailable'}"><input type="checkbox" name="draftAddon" value="${a.id}" ${d.addons.includes(a.id) ? 'checked' : ''} ${available ? '' : 'disabled'}><span><strong>${esc(a.title)}</strong><small>${esc(a.desc)}</small></span></label>`; }).join('')}</div><p class="install-note">${d.loader==='vanilla' ? '选择加载器后即可添加模组。' : '若所选模组没有兼容的版本，任务会显示具体原因。'}</p>
- <div class="install-actions"><button class="outline-btn" data-action="close-install">取消</button><button class="save-button" data-action="confirm-install">加入下载任务 ${icon('chevron-right',16)}</button></div></section></div>`;
-}
-function updateSettings() {
- const info=state.updateInfo;
- const message=state.updateState==='checking'?'正在检查 GitHub 更新…':state.updateState==='error'?`检查失败：${state.updateError}`:info?.available?`发现新版本 v${info.latestVersion}。`:state.updateState==='success'?'当前已是最新正式版。':'启动后会自动检查新版本。';
- return `<section class="settings-section update-settings"><div class="settings-heading"><div class="settings-icon">${icon('download',20)}</div><div><span class="section-index">CCL / UPDATE</span><h3>启动器更新</h3><p>当前版本 v${esc(appVersion)}</p></div></div><div class="update-settings-row"><p role="status">${esc(message)}</p><div><button class="outline-btn" type="button" data-action="check-update" ${state.updateState==='checking'?'disabled':''}>${state.updateState==='checking'?'检查中…':'检查更新'}</button>${info?.available?'<button class="save-button" type="button" data-action="open-update">前往下载</button>':''}</div></div></section>`;
-}
-function renderUpdateChrome() {
- const slot=app.querySelector('#update-slot'), info=state.updateInfo;
- const badgeKey=JSON.stringify([info?.available,info?.latestVersion,state.updateDismissed]);
- if(slot && slot.dataset.updateKey!==badgeKey) {slot.dataset.updateKey=badgeKey;slot.innerHTML=info?.available && info.latestVersion!==state.updateDismissed ? `<div class="update-pill"><button type="button" data-action="open-update" title="打开 GitHub 下载页面">${icon('download',14)} <span>新版本 v${esc(info.latestVersion)}</span></button><button type="button" data-action="dismiss-update" aria-label="暂时隐藏更新提示">${icon('x',13)}</button></div>` : '';}
- const panel=app.querySelector('#update-panel'),panelKey=JSON.stringify([state.updateState,state.updateError,info?.available,info?.latestVersion]);
- if(panel && panel.dataset.updateKey!==panelKey){panel.dataset.updateKey=panelKey;panel.innerHTML=updateSettings();}
-}
 async function checkLauncherUpdate(manual=false) {
  if(state.updateState==='checking')return;
  state.updateState='checking';state.updateError='';renderChrome();
@@ -354,52 +291,8 @@ async function checkLauncherUpdate(manual=false) {
  renderChrome();
 }
 
-function settingsPage() {
- const selectedVersion=state.versions.find(v=>v.id===state.selected && v.installed);
- return `<div class="page-heading inner-heading"><div><h1>启动设置</h1><p>调整游戏运行环境与启动参数。</p></div></div>
- <div id="update-panel">${updateSettings()}</div>${appearanceSettings()}<form id="settings-form"><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('user-round', 20)}</div><div><span class="section-index">01 / PLAYER</span><h3>玩家身份</h3><p>设置用于启动游戏的离线玩家名称。</p></div></div><div class="field"><label for="username">玩家名称 <span>1–16 位字母、数字或下划线</span></label><input id="username" name="username" value="${esc(state.username)}" maxlength="16" required pattern="[A-Za-z0-9_]{1,16}"><p>离线玩家名称；正版账户请在“账户与外观”中登录。</p><button class="text-link" type="button" data-page="account">打开账户与外观 →</button></div></section>
- <section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('monitor', 20)}</div><div><span class="section-index">02 / ENVIRONMENT</span><h3>游戏环境</h3><p>配置 Java 和游戏文件的存放位置。</p></div></div><div class="field"><label for="javaPath">Java 可执行文件 <span>JAVA PATH</span></label><input id="javaPath" name="javaPath" value="${esc(state.javaPath)}" required><p>使用系统 PATH 中的 java，或填写完整路径。请根据游戏版本选择对应的 Java，或前往 Java 管理下载。</p><button class="text-link" type="button" data-page="java">打开 Java 管理 →</button></div><div class="field"><label for="gameDir">游戏目录 <span>GAME DIRECTORY</span></label><input id="gameDir" name="gameDir" value="${esc(state.gameDir)}" required><p>下载的版本、资源和游戏存档将保存在这里。</p></div><div class="field isolation-field"><label class="option-check"><input id="version-isolation" name="versionIsolation" type="checkbox" ${selectedVersion?.isolated?'checked':''} ${!selectedVersion || selectedVersion.kind==='整合包'?'disabled':''}> 版本隔离</label><p>${selectedVersion ? `当前版本：${esc(selectedVersion.name || selectedVersion.id)}${selectedVersion.kind==='整合包'?' · 整合包始终使用独立目录':''}` : '请先选择已安装的游戏版本。'}</p><p>启用后，此版本的存档、模组与配置使用独立游戏目录。切换不会移动或删除原有文件。</p></div><div class="field memory-field"><label for="memory-mode">最大内存 <span>JAVA 堆上限</span></label><select id="memory-mode" name="memoryMode"><option value="auto" ${state.memoryMode==='auto'?'selected':''}>自动分配</option><option value="manual" ${state.memoryMode==='manual'?'selected':''}>手动设置</option></select><div id="memory-manual" ${state.memoryMode==='auto'?'hidden':''}><div class="memory-value"><label for="memory">手动上限</label><div><input id="memory" name="memory" type="number" min="512" max="32768" step="1" value="${esc(state.memory)}" required><span>MB</span></div></div><input id="memory-range" aria-label="调整最大内存" type="range" min="512" max="32768" step="256" value="${esc(state.memory)}"><div class="range-labels"><span>512 MB</span><span>32 GB</span></div></div><div id="memory-info">${memoryInfoMarkup()}</div><p>自动模式在每次启动时根据总内存和可用内存重新计算，预留系统空间。自定义 JVM 参数中的 -Xmx 会覆盖此设置。</p></div></section><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('zap',20)}</div><div><span class="section-index">03 / LAUNCH OPTIONS</span><h3>启动参数</h3><p>按需调整 Java 和游戏启动方式。</p></div></div><div class="field"><label class="option-check"><input name="optimize" type="checkbox" ${state.optimize ? 'checked' : ''}> 启用 G1 垃圾回收优化</label><p>使用 Java 内置的 G1GC；自定义 JVM 参数可覆盖或补充设置。</p></div><div class="field"><label for="jvmArgs">自定义 JVM 参数 <span>JVM ARGUMENTS</span></label><input id="jvmArgs" name="jvmArgs" value="${esc(state.jvmArgs)}" placeholder="例如 -XX:MaxGCPauseMillis=100"><p>用空格分隔，带空格的值可用引号包裹。</p></div><div class="field"><label for="gameArgs">自定义游戏参数 <span>GAME ARGUMENTS</span></label><input id="gameArgs" name="gameArgs" value="${esc(state.gameArgs)}" placeholder="例如 --width 1280 --height 720"></div></section><section class="settings-section"><div class="settings-heading"><div class="settings-icon">${icon('globe-2', 20)}</div><div><span class="section-index">03 / NETWORK</span><h3>网络代理</h3><p>下载游戏、Java 和模组时使用的连接方式。</p></div></div><div class="field"><label for="proxyUrl">手动代理地址 <span>留空时使用系统代理</span></label><input id="proxyUrl" name="proxyUrl" value="${esc(state.proxyUrl)}" placeholder="例如 http://127.0.0.1:7890"><p>支持 HTTP、HTTPS 和 SOCKS5；使用系统代理时请留空。代理地址不支持填写账号或密码。</p></div></section><div class="settings-actions"><p>设置保存在本设备上。</p><button class="save-button" type="submit">保存设置 ${icon('chevron-right', 16)}</button></div></form>`;
-}
-function contentPage() {
- const count = n => n >= 1000000 ? (n / 1000000).toFixed(1) + 'm' : n >= 1000 ? (n / 1000).toFixed(1) + 'k' : n;
- return `<div class="page-heading inner-heading"><div><h1>模组与资源</h1><p>浏览并安装与目标版本兼容的内容。</p></div></div>
- <section class="content-search">${state.contentKind!=='modpack' ? `<label class="target-select">安装到已安装的游戏版本<select id="contentTarget" ${state.contentBusy ? 'disabled' : ''}><option value="">选择目标版本</option>${state.versions.filter(v=>v.installed).map(v=>`<option value="${esc(v.id)}" ${state.contentTarget===v.id?'selected':''}>${esc(v.name || v.id)}</option>`).join('')}</select></label>` : ''}<form id="content-form"><div class="content-selects"><label>内容来源<select name="source" ${state.contentBusy ? 'disabled' : ''}><option value="modrinth" ${state.contentSource === 'modrinth' ? 'selected' : ''}>Modrinth</option><option value="curseforge" ${state.contentSource === 'curseforge' ? 'selected' : ''}>CurseForge</option></select></label><label>内容类型<select name="kind" ${state.contentBusy ? 'disabled' : ''}><option value="mod" ${state.contentKind === 'mod' ? 'selected' : ''}>模组</option><option value="modpack" ${state.contentKind === 'modpack' ? 'selected' : ''}>整合包</option><option value="resourcepack" ${state.contentKind === 'resourcepack' ? 'selected' : ''}>材质包</option><option value="shader" ${state.contentKind === 'shader' ? 'selected' : ''}>光影包</option></select></label><label class="content-sort">排序方式<select name="sort" ${state.contentBusy ? 'disabled' : ''}><option value="downloads" ${state.contentSort === 'downloads' ? 'selected' : ''}>下载最多</option><option value="updated" ${state.contentSort === 'updated' ? 'selected' : ''}>最近更新</option><option value="newest" ${state.contentSort === 'newest' ? 'selected' : ''}>最新发布</option><option value="recommended" ${state.contentSort === 'recommended' ? 'selected' : ''}>推荐 / 相关度</option></select></label></div><div class="content-filters"><label>分类<select id="content-category" name="category" ${state.contentCategoriesLoading||!state.contentCategories.length?'disabled':''}><option value="">全部分类</option>${state.contentCategories.map(c=>`<option value="${esc(c.id)}" ${state.contentCategory===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>${state.contentKind==='modpack'?`<label>游戏版本<input name="gameFilter" value="${esc(state.contentGameFilter)}" placeholder="例如 1.20.1" maxlength="40" pattern="[A-Za-z0-9._-]*"></label><label>加载器<select name="loaderFilter"><option value="">全部加载器</option>${['fabric','quilt','forge','neoforge'].map(v=>`<option value="${v}" ${state.contentLoaderFilter===v?'selected':''}>${v}</option>`).join('')}</select></label>`:''}${state.contentSource==='modrinth'?`<label>运行环境<select name="environment"><option value="">全部环境</option><option value="client_only" ${state.contentEnvironment==='client_only'?'selected':''}>仅客户端</option><option value="client_and_server" ${state.contentEnvironment==='client_and_server'?'selected':''}>客户端和服务端</option></select></label>`:''}</div>${state.contentSource === 'curseforge' ? `<label class="content-key">CurseForge API Key<input type="password" name="apiKey" ${state.contentBusy ? 'disabled' : ''} value="${esc(state.contentKey)}" placeholder="输入 API Key（仅当前会话保存）" autocomplete="off"></label>` : ''}<div class="content-search-row"><input name="query" value="${esc(state.contentQuery)}" placeholder="搜索模组、整合包、材质包或光影包"><button class="save-button" type="submit" ${state.contentBusy ? 'disabled' : ''}>搜索 ${icon('chevron-right',16)}</button></div></form><p>${state.contentKind === 'mod' ? '只显示与目标版本和加载器兼容的模组。' : state.contentKind === 'modpack' ? '整合包将创建独立游戏目录。' : state.contentKind === 'shader' ? '按游戏版本筛选；使用光影还需在游戏中安装并启用 Iris、OptiFine 等光影支持。' : '按游戏版本筛选；下载后在游戏资源包设置中启用。'}</p><div id="shader-status">${shaderStatus()}</div></section>
-
- <div class="section-title"><div><span class="section-index">01 / DISCOVER</span><h3>浏览内容 <span class="count">${state.contentResults.length}</span></h3></div><span class="section-note">${state.contentSource === 'modrinth' ? 'Modrinth' : 'CurseForge'}</span></div><div class="version-list">${state.contentResults.length ? state.contentResults.map((hit,i) => `<div class="version-row content-row">${thumbnail('content',hit.iconUrl,state.contentKind === 'mod' ? 'blocks' : 'box','row-icon')}<div class="row-name"><strong>${esc(hit.title)}</strong><span data-content-summary="${i}">${esc(hit.localizedDescription || hit.description)}</span><span>${esc(hit.author)} · ${count(hit.downloads)} 次下载</span></div><button class="row-button content-details" data-content-details="${i}">详情</button><button class="row-button ${hit.installed ? 'selected' : ''}" data-content-install="${i}" ${state.contentBusy || (state.contentKind!=='modpack' && hit.installed) ? 'disabled' : ''}>${hit.installed && state.contentKind!=='modpack' ? '已安装' : `${icon('download',14)} ${state.contentKind!=='modpack' ? '选择版本' : '安装'}`}</button></div>`).join('') : `<div class="empty-state">${icon('compass',27)}<strong>${state.contentBusy?'正在加载…':state.contentError?'加载失败':state.contentLoaded?'此页没有兼容项目':'选择游戏版本后浏览内容'}</strong><p>${esc(state.contentError || (state.contentLoaded && state.contentHasMore?'可继续浏览下一页。':state.contentSource==='curseforge'&&!state.contentKey?'输入 CurseForge API Key 后即可浏览。':'选择已安装的游戏版本，或切换到整合包浏览。'))}</p></div>`}</div><div class="content-pagination"><span>${state.contentLoaded ? `第 ${state.contentPage+1} 页` : ''}</span><div><button class="outline-btn" data-content-page="${state.contentPage-1}" ${state.contentBusy||state.contentPage===0?'disabled':''}>上一页</button><button class="outline-btn" data-content-page="${state.contentPage+1}" ${state.contentBusy||!state.contentHasMore?'disabled':''}>下一页</button></div></div>
- ${state.contentKind==='mod' ? `<div class="section-title"><div><span class="section-index">02 / INSTALLED MODS</span><h3>当前实例模组 <span class="count" id="local-mod-count">${state.localMods.length}</span></h3></div><span class="section-note" id="local-mod-target">${esc(state.contentTarget || '未选择游戏版本')}</span></div>
- <div class="mod-toolbar"><input id="local-mod-search" value="${esc(state.modQuery)}" placeholder="筛选已安装的模组" aria-label="筛选已安装的模组"><select id="local-mod-filter" aria-label="模组状态"><option value="all" ${state.modFilter==='all'?'selected':''}>全部状态</option><option value="enabled" ${state.modFilter==='enabled'?'selected':''}>已启用</option><option value="disabled" ${state.modFilter==='disabled'?'selected':''}>已停用</option></select><button class="outline-btn" data-action="check-mod-conflicts" ${state.modConflictsLoading||!state.contentTarget||state.modWorking?'disabled':''}>${state.modConflictsLoading?'排查中…':'排查冲突'}</button><button class="outline-btn" data-action="check-mod-updates" ${state.modChecking||!state.contentTarget||state.modWorking?'disabled':''}>${state.modChecking?'检查中…':'检查更新'}</button></div><div id="local-mod-update-summary">${modUpdateSummary()}</div><div id="mod-conflict-report">${conflictSummary()}</div><div id="local-mod-list">${localModList()}</div>
- ${state.modDelete?.length ? `<div class="confirm-overlay"><div class="confirm-box"><span class="section-index">REMOVE MOD</span><h3>删除 ${state.modDelete.length} 个模组？</h3><p>${state.modDelete.map(esc).join('、')} 将从当前实例删除。其他模组可能依赖这些文件；模组配置和存档会保留。</p><div><button class="row-button" data-action="cancel-mod-remove">取消</button><button class="row-button danger-button" data-action="confirm-mod-remove">确认删除</button></div></div></div>` : ''}` : ''}${['resourcepack','shader'].includes(state.contentKind)?localPackSection():''}`;
-}
-function shaderStatus() {
- if(state.contentKind!=='shader'||!state.contentTarget)return '';
- const env=state.shaderEnv;
- if(state.shaderEnvLoading)return '<div class="shader-status"><strong>正在检测光影环境…</strong></div>';
- if(!env)return `<div class="shader-status warning"><strong>无法确认光影环境</strong><span>${esc(state.shaderEnvError || '请检查目标版本的光影支持组件。')}</span><button class="row-button" data-action="refresh-packs">重新检测</button></div>`;
- if(env.detected?.length)return `<div class="shader-status ready"><strong>已检测到 ${esc(env.detected.join('、'))}</strong><span>请在游戏中启用光影；具体兼容性以游戏内实际运行情况为准。</span></div>`;
- const hint=env.uncertain?'部分模组无法读取，可能存在未识别的光影组件。':'未检测到 Iris、Oculus 或 OptiFine。';
- const suggested=env.loader==='forge'?'Oculus':['fabric','quilt','neoforge'].includes(env.loader)?'Iris':'';
- return `<div class="shader-status warning"><strong>光影环境${env.uncertain?'无法完全确认':'未检测到'}</strong><span>${hint}${suggested?'可浏览与目标版本兼容的 '+suggested+'。':'请先安装支持光影的加载器或组件。'}</span>${suggested?`<button class="row-button" data-action="find-shader-support" data-query="${suggested}">查找 ${suggested}</button>`:''}</div>`;
-}
-function localPackList() {
- const matches=state.localPacks.map((pack,index)=>({pack,index})).filter(({pack})=>pack.name.toLocaleLowerCase().includes(state.packQuery.trim().toLocaleLowerCase()));
- if(state.packLoading)return '<div class="empty-state"><strong>正在读取资源包…</strong></div>';
- if(state.packError)return `<div class="empty-state"><strong>读取失败</strong><p>${esc(state.packError)}</p></div>`;
- if(!matches.length)return `<div class="empty-state">${icon('box',27)}<strong>${state.localPacks.length?'没有匹配的资源包':'当前游戏目录没有资源包'}</strong><p>${state.localPacks.length?'试试其他关键词。':'在上方浏览下载，或打开文件夹手动添加。'}</p></div>`;
- return `<div class="version-list">${matches.map(({pack:p,index:i})=>{const update=state.packUpdates?.updates?.find(u=>u.name===p.name);return `<div class="version-row"><div class="row-icon">${icon(p.directory?'folder-open':'box',19)}</div><div class="row-name"><strong class="java-path" title="${esc(p.name)}">${esc(p.name)}</strong><span>${p.directory?'文件夹':'ZIP 文件'} · ${p.source ? esc(p.source==='modrinth'?'Modrinth':'CurseForge'):'手动添加或来源未知'}${update?` · 可更新至 ${esc(update.latest)}`:''}</span></div>${update?.projectUrl?`<button class="row-button" data-open-project="${esc(update.projectUrl)}">查看更新</button>`:''}<button class="row-button danger-button" data-pack-remove="${i}" ${state.packWorking?'disabled':''}>删除</button></div>`;}).join('')}</div>`;
-}
-function packUpdateSummary() { const r=state.packUpdates;return r?`已检查 ${r.checked} 个，发现 ${r.updates.length} 个可更新；${r.unknown} 个无法识别或确认，${r.failed} 个检查失败。`:'更新检查仅覆盖由 CCL 安装且可识别的资源包；CurseForge 需要 API Key。'; }
-function localPackSection() {
- const label=state.contentKind==='shader'?'光影包':'材质包';
- const selected=state.versions.find(v=>v.id===state.contentTarget);
- return `<div class="section-title"><div><span class="section-index">02 / INSTALLED PACKS</span><h3>当前游戏目录的${label} <span class="count" id="local-pack-count">${state.localPacks.length}</span></h3></div><span class="section-note">${selected?.isolated?'独立游戏目录':'可能与其他版本共用目录'}</span></div><div class="mod-toolbar"><input id="local-pack-search" value="${esc(state.packQuery)}" placeholder="筛选已安装的${label}" aria-label="筛选已安装的${label}"><button class="outline-btn" data-action="refresh-packs" ${!state.contentTarget||state.packWorking?'disabled':''}>刷新</button><button class="outline-btn" data-action="open-pack-folder" ${!state.contentTarget?'disabled':''}>${icon('folder-open',15)} 打开文件夹</button><button class="outline-btn" data-action="check-pack-updates" ${!state.contentTarget||state.packChecking||state.packWorking?'disabled':''}>${state.packChecking?'检查中…':'检查更新'}</button></div><p class="mod-update-summary" id="pack-update-summary">${esc(packUpdateSummary())}</p><div id="local-pack-list">${localPackList()}</div>${state.packDelete?`<div class="confirm-overlay"><div class="confirm-box" role="dialog" aria-modal="true"><span class="section-index">REMOVE PACK</span><h3>删除${label}？</h3><p>${esc(state.packDelete.name)} 将从游戏目录删除。若多个版本共用此目录，也会影响其他版本；游戏中的启用状态需自行调整。</p><div><button class="row-button" data-action="cancel-pack-remove">取消</button><button class="row-button danger-button" data-action="confirm-pack-remove">确认删除</button></div></div></div>`:''}`;
-}
-function renderLocalPacks() {
- const list=app.querySelector('#local-pack-list');if(list){list.innerHTML=localPackList();hydrateIcons();}
- const count=app.querySelector('#local-pack-count');if(count)count.textContent=state.localPacks.length;
- const summary=app.querySelector('#pack-update-summary');if(summary)summary.textContent=packUpdateSummary();
- const button=app.querySelector('[data-action=check-pack-updates]');if(button){button.disabled=!state.contentTarget||state.packChecking||state.packWorking;button.textContent=state.packChecking?'检查中…':'检查更新';}
- const status=app.querySelector('#shader-status');if(status)status.innerHTML=shaderStatus();
-}
+function renderContentPage() { if(state.page==='content' && app.querySelector('.content')) { renderer.page(ContentPage,{state},'content'); hydrateThumbnails(); } }
+function renderLocalPacks() { renderContentPage(); }
 let packEpoch=0;
 async function refreshPacks() {
  const kind=state.contentKind,version=state.contentTarget,gameDir=state.gameDir,epoch=++packEpoch;
@@ -412,15 +305,6 @@ async function refreshPacks() {
  await Promise.all([packs,env]);
 }
 
-function manageDialog() {
- const d=state.manageView;if(!d)return '';
- const backups=d.kind==='backups',label=backups?'备份与恢复':'存档管理';
- const date=value=>{if(!value)return '时间未知';const n=Number(value);return Number.isFinite(n)?new Date(backups?n*1000:n).toLocaleString():'时间未知';};
- const size=value=>Number(value)>=1073741824?`${(value/1073741824).toFixed(2)} GB`:`${(Number(value||0)/1048576).toFixed(1)} MB`;
- const rows=d.items.map((item,i)=>backups?`<div class="version-row manage-row"><div class="row-icon">${icon('hard-drive',18)}</div><div class="row-name"><strong>${item.scope==='world'?`存档备份 · ${esc(item.world)}`:'实例备份'}</strong><span>${esc(date(item.created))} · ${esc(size(item.size))}</span></div><button class="row-button" data-manage-restore="${i}" ${d.busy?'disabled':''}>恢复</button><button class="row-button danger-button" data-manage-delete="${i}" ${d.busy?'disabled':''}>删除</button></div>`:`<div class="version-row manage-row"><div class="row-icon">${icon('box',18)}</div><div class="row-name"><strong>${esc(item.name)}</strong><span>${esc(item.folder)} · ${item.gameVersion?`Minecraft ${esc(item.gameVersion)} · `:''}${esc(date(item.lastPlayed))}${item.metadataError?' · 存档信息暂不可读':''}</span></div><button class="row-button" data-world-open="${i}" ${d.busy?'disabled':''}>文件夹</button><button class="row-button" data-world-backup="${i}" ${d.busy?'disabled':''}>备份</button><button class="row-button danger-button" data-manage-delete="${i}" ${d.busy?'disabled':''}>删除</button></div>`).join('');
- const confirmation=d.confirm?`<div class="manage-confirm" role="alert"><strong>${d.confirm.action==='restore'?'恢复所选备份？':backups?'删除所选备份？':'删除所选存档？'}</strong><p>${d.confirm.action==='restore'?'将替换备份覆盖范围内的当前数据，恢复前会自动备份整个实例；共用游戏目录可能影响其他版本。':backups?'删除后无法从此备份恢复。':'删除前会自动备份此存档；共用游戏目录可能影响其他版本。'}</p><div><button class="outline-btn" data-action="manage-cancel" ${d.busy?'disabled':''}>取消</button><button class="row-button danger-button" data-action="manage-confirm" ${d.busy?'disabled':''}>确认${d.confirm.action==='restore'?'恢复':'删除'}</button></div></div>`:'';
- return `<div class="install-overlay"><section class="install-dialog manage-dialog" role="dialog" aria-modal="true" aria-labelledby="manage-title"><div class="install-dialog-head"><div><span class="section-index">${backups?'INSTANCE / BACKUPS':'INSTANCE / WORLDS'}</span><h2 id="manage-title">${label}</h2><p>${esc(d.name)} · ${d.isolated?'独立游戏目录':'共用游戏目录'}</p></div><button class="icon-button" data-action="close-manage" aria-label="关闭" ${d.busy?'disabled':''}>${icon('x',19)}</button></div><div class="manage-toolbar">${backups?`<button class="save-button" data-action="create-instance-backup" ${d.busy?'disabled':''}>创建实例备份</button><button class="outline-btn" data-action="switch-worlds" ${d.busy?'disabled':''}>存档管理</button>`:`<button class="outline-btn" data-action="open-saves-folder" ${d.busy?'disabled':''}>打开存档目录</button><button class="outline-btn" data-action="switch-backups" ${d.busy?'disabled':''}>查看备份</button>`}<button class="outline-btn" data-action="refresh-manage" ${d.busy?'disabled':''}>刷新</button></div><p class="manage-note">${backups?'备份包含模组、配置、资源包和存档。操作时请先退出游戏，恢复前会自动保存当前实例。':'显示当前游戏目录中的世界；单独备份后可在“查看备份”中恢复。'}</p>${confirmation}${d.busy?'<p class="manage-busy" role="status">正在处理，请稍候…</p>':''}${d.error?`<p class="manage-error">${esc(d.error)}</p>`:''}<div class="manage-list">${d.loading?'<div class="empty-state">正在读取…</div>':rows||`<div class="empty-state"><strong>${backups?'尚无备份':'没有找到存档'}</strong></div>`}</div><div class="install-actions"><button class="outline-btn" data-action="close-manage" ${d.busy?'disabled':''}>关闭</button></div></section></div>`;
-}
 async function loadManage(view=state.manageView) {
  if(!view)return;view.loading=true;view.error='';renderOverlay();
  try{const items=await invoke(view.kind==='backups'?'list_backups':'list_worlds',{gameDir:view.gameDir,version:view.version});if(state.manageView===view)view.items=Array.isArray(items)?items:[];}catch(e){if(state.manageView===view)view.error=String(e);}finally{if(state.manageView===view){view.loading=false;renderOverlay();}}
@@ -435,19 +319,7 @@ async function manageOperation(command,args,success){
  catch(e){if(state.manageView===view)view.error=String(e);}
  finally{if(state.manageView===view){view.busy=false;renderOverlay();}}
 }
-function conflictSummary(){
- const r=state.modConflicts;if(!r)return '';
- const issues=Array.isArray(r.issues)?r.issues:[];
- return `<div class="conflict-report"><strong>${issues.length?`发现 ${issues.length} 个可能问题`:'未发现可识别的冲突'}</strong><span>已检查 ${esc(r.checked)} 个；${esc(r.unknown)} 个文件无法识别。未识别的版本规则不会被视为冲突。</span>${issues.length?`<ul>${issues.map(i=>`<li>${esc(i.message)}${i.files?.length?` <small>${esc(i.files.join('、'))}</small>`:''}</li>`).join('')}</ul>`:''}</div>`;
-}
-
-function modUpdateSummary() { const r=state.modUpdates;if(!r)return '<p class="mod-update-summary">更新检查仅覆盖可识别的 Modrinth 模组，并按当前游戏版本和加载器筛选。</p>';return `<p class="mod-update-summary">已检查 ${r.checked} 个，发现 ${r.updates.length} 个可更新；${r.unknown} 个无法识别或确认，${r.failed} 个检查失败。</p>`; }
-function localModList() {
- const matches=state.localMods.map((mod,index)=>({mod,index})).filter(({mod})=>mod.name.toLocaleLowerCase().includes(state.modQuery.trim().toLocaleLowerCase()) && (state.modFilter==='all'||mod.enabled===(state.modFilter==='enabled')));
- const selected=state.selectedMods.size, busy=state.modWorking || state.contentBusy;
- return `<div class="mod-bulk"><label><input type="checkbox" id="mod-select-visible" ${matches.length && matches.every(({mod})=>state.selectedMods.has(mod.name))?'checked':''} ${!matches.length||busy?'disabled':''}> 选择筛选结果</label><span>已选择 ${selected} 个</span><div><button class="row-button" data-action="bulk-mod-enable" ${!selected||busy?'disabled':''}>启用</button><button class="row-button" data-action="bulk-mod-disable" ${!selected||busy?'disabled':''}>停用</button><button class="row-button danger-button" data-action="bulk-mod-delete" ${!selected||busy?'disabled':''}>删除</button></div></div><div class="version-list">${matches.length ? matches.map(({mod:m,index:i})=>`<div class="version-row"><input class="mod-check" type="checkbox" data-mod-select="${i}" aria-label="选择 ${esc(m.name)}" ${state.selectedMods.has(m.name)?'checked':''} ${busy?'disabled':''}><div class="row-icon">${icon('blocks',19)}</div><div class="row-name"><strong class="java-path">${esc(m.name)}</strong><span>${m.enabled ? '已启用' : '已停用'}${state.modUpdates?.updates.find(u=>u.name===m.name) ? ` · 可更新至 ${esc(state.modUpdates.updates.find(u=>u.name===m.name).latest)}` : ''}</span></div>${state.modUpdates?.updates.find(u=>u.name===m.name) ? `<button class="row-button" data-open-project="https://modrinth.com/mod/${esc(state.modUpdates.updates.find(u=>u.name===m.name).projectId)}">查看更新</button>` : ''}<button class="row-button" data-mod-toggle="${i}" ${busy?'disabled':''}>${m.enabled ? '停用' : '启用'}</button><button class="row-button danger-button" data-mod-remove="${i}" ${busy?'disabled':''}>删除</button></div>`).join('') : `<div class="empty-state">${icon('box',27)}<strong>${state.localMods.length?'没有匹配的模组':'当前实例没有模组'}</strong><p>${state.localMods.length?'试试其他筛选条件。':'在上方搜索并安装兼容的模组。'}</p></div>`}</div>`;
-}
-function renderLocalMods() { const list=app.querySelector('#local-mod-list');if(list){list.innerHTML=localModList();hydrateIcons();}const target=app.querySelector('#contentTarget');if(target)target.disabled=state.modWorking||state.contentBusy;const count=app.querySelector('#local-mod-count');if(count)count.textContent=state.localMods.length;const label=app.querySelector('#local-mod-target');if(label)label.textContent=state.contentTarget||'未选择游戏版本';const summary=app.querySelector('#local-mod-update-summary');if(summary)summary.innerHTML=modUpdateSummary();const conflicts=app.querySelector('#mod-conflict-report');if(conflicts)conflicts.innerHTML=conflictSummary();const conflictButton=app.querySelector('[data-action=check-mod-conflicts]');if(conflictButton){conflictButton.disabled=state.modConflictsLoading||!state.contentTarget||state.modWorking;conflictButton.textContent=state.modConflictsLoading?'排查中…':'排查冲突';}const check=app.querySelector('[data-action=check-mod-updates]');if(check){check.disabled=state.modChecking||!state.contentTarget||state.modWorking;check.textContent=state.modChecking?'检查中…':'检查更新';} }
+function renderLocalMods() { renderContentPage(); }
 async function applyModChanges(action, names) {
  if(state.modWorking || !names.length) return;
  const version=state.contentTarget,gameDir=state.gameDir,chosen=state.localMods.filter(m=>names.includes(m.name));
@@ -470,12 +342,7 @@ async function refreshMods() {
 const categoryCache=new Map();
 const contentCache=new Map();
 let categoryEpoch=0;
-function updateCategoryControl() {
- const select=app.querySelector('#content-category');if(!select)return;
- select.innerHTML=`<option value="">全部分类</option>${state.contentCategories.map(c=>`<option value="${esc(c.id)}" ${state.contentCategory===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}`;
- select.disabled=state.contentCategoriesLoading || !state.contentCategories.length;
- select.title=state.contentCategoryError || (state.contentCategoriesLoading?'正在加载分类':'按来源分类筛选');
-}
+function updateCategoryControl() { renderContentPage(); }
 async function loadContentCategories() {
  const source=state.contentSource,kind=state.contentKind,apiKey=state.contentKey,epoch=++categoryEpoch,key=JSON.stringify([source,kind]);
  state.contentCategories=[];state.contentCategoryError='';
@@ -508,82 +375,16 @@ async function translateVisibleSummaries(source,hits) {
  try {
   const translations=await invoke('translate_content_summaries',{source,items:hits.map(hit=>({projectId:hit.id,summary:hit.description||''}))});
   if(state.contentResults!==hits || state.contentSource!==source || !translations)return;
-  hits.forEach((hit,i)=>{if(typeof translations[hit.id]!=='string'||!translations[hit.id].trim())return;hit.localizedDescription=translations[hit.id];const el=app.querySelector(`[data-content-summary="${i}"]`);if(el)el.textContent=hit.localizedDescription;});
+  hits.forEach(hit=>{if(typeof translations[hit.id]==='string' && translations[hit.id].trim())hit.localizedDescription=translations[hit.id];});renderContentPage();
  } catch { /* Preserve the original summaries when translation is unavailable. */ }
 }
 
-function projectLinks(d) {
- const links=[];
- if(d.projectUrl) links.push({label:d.source==='modrinth'?'Modrinth':'CurseForge',url:d.projectUrl});
- for(const link of d.links || []) if(link && typeof link.url==='string' && !links.some(x=>x.url===link.url)) links.push(link);
- if(d.encyclopedia?.url && !links.some(x=>x.label==='MC 百科'))links.push({label:'MC 百科',url:d.encyclopedia.url});
- if(!links.some(x=>x.label==='MC 百科')) links.push({label:'搜索 MC 百科',url:`https://search.mcmod.cn/s?key=${encodeURIComponent(d.title)}`});
- return `<div class="project-links"><strong>相关网址</strong>${links.map(link=>`<button type="button" class="content-project-link" data-open-project="${esc(link.url)}" title="在浏览器中打开"><span>${esc(link.label)}</span><small>${esc(link.url)} ↗</small></button>`).join('')}${d.linksLoading?'<p>正在获取其他网址…</p>':d.linksError?'<p>其他网址暂时不可用，仍可打开上面的链接。</p>':''}</div>`;
-}
-function updateProjectLinks() {const root=app.querySelector('.mod-project-links');if(root && state.modDraft)root.innerHTML=projectLinks(state.modDraft);}
-function descriptionText(value) {
- const template=document.createElement('template');template.innerHTML=String(value || '');
- template.content.querySelectorAll('script,style,iframe,object,embed,svg,video,audio,img').forEach(node=>node.remove());
- template.content.querySelectorAll('br').forEach(node=>node.replaceWith(document.createTextNode('\n')));
- template.content.querySelectorAll('p,div,li,h1,h2,h3,h4,h5,h6,pre,blockquote,tr').forEach(node=>node.append(document.createTextNode('\n')));
- return (template.content.textContent || '').replace(/!\[([^\]]*)\]\([^\n)]*\)/g,'$1').replace(/\[([^\]]+)\]\([^\n)]*\)/g,'$1').replace(/^\s{0,3}#{1,6}\s+/gm,'').replace(/^\s*`{3,}[^\n]*$/gm,'').replace(/\*\*|~~|`/g,'').replace(/\n{3,}/g,'\n\n').trim();
-}
-function projectDescription(d) {
- const original=descriptionText(d.description) || String(d.summary || '').trim();
- const excerptText=String(d.encyclopedia?.summary||'').replace(/\[[^\]]{1,120}\]/g,'').trim(), excerpt=/[\u3400-\u9fff]/.test(excerptText)?excerptText:'';
- const chinese=d.translation ? descriptionText(d.translation) : excerpt;
- const showChinese=!!chinese && !d.showOriginal, description=showChinese?chinese:original;
- const status=d.descriptionLoading?'正在获取完整介绍…':d.translationLoading?'正在获取中文介绍…':showChinese?(d.translation?'AI 翻译 · 仅供参考':'MC 百科摘要'):d.descriptionError?'完整介绍暂时不可用':'';
- return `<section class="project-description"><div class="project-description-head"><strong>项目介绍</strong>${status?`<small>${esc(status)}</small>`:''}${chinese?`<button class="text-link" type="button" data-action="toggle-content-language">${showChinese?'查看原文':'查看中文'}</button>`:''}</div>${description?`<div class="project-description-text" tabindex="0">${esc(description)}</div>`:`<p>${d.descriptionLoading?'正在加载介绍…':d.descriptionError?'暂时无法获取介绍。':'暂无介绍。'}</p>`}</section>`;
-}
-function updateProjectDescription() {const root=app.querySelector('.mod-project-description');if(root && state.modDraft)root.innerHTML=projectDescription(state.modDraft);}
-function modVersionDialog() {
- const d=state.modDraft; if(!d) return '';
- const pack=d.kind==='modpack', label=({mod:'模组',resourcepack:'材质包',shader:'光影包'})[d.kind] || '内容';
- return `<div class="install-overlay" data-action="close-mod-backdrop"><section class="install-dialog mod-dialog" role="dialog" aria-modal="true" aria-labelledby="mod-dialog-title"><div class="install-dialog-head"><div><span class="section-index">${pack?'MODPACK':esc(label)+'版本'} / ${esc(d.source)}</span><h2 id="mod-dialog-title">${esc(d.title)}</h2><p>${pack?'整合包将创建独立游戏目录':`安装到 ${esc(d.target)}${d.kind==='mod'?' · 自动安装必需依赖':d.kind==='shader'?' · 游戏中需支持光影并手动启用':' · 在游戏资源包设置中启用'}`}</p></div><button class="icon-button" data-action="close-mod-dialog" aria-label="关闭">${icon('x',19)}</button></div>${d.kind==='shader'?`<p class="pack-dialog-status">${esc(state.shaderEnvLoading?'正在检测光影环境…':state.shaderEnv?.detected?.length?`已检测到 ${state.shaderEnv.detected.join("、")}；请在游戏中启用光影，具体兼容性以实际运行为准。`:'尚未确认光影环境；下载后仍需 Iris、Oculus 或 OptiFine 等组件。')}</p>`:''}<div class="mod-project-description">${projectDescription(d)}</div><div class="mod-project-links">${projectLinks(d)}</div>${pack?'':`<div class="install-section-heading"><span>01</span><div><strong>选择${esc(label)}版本</strong><small>${d.kind==='mod'?'仅显示兼容目标游戏版本和加载器的版本':'仅显示来源标注支持目标游戏版本的版本'}</small></div></div>${d.loading?'<div class="empty-state">正在获取兼容版本…</div>':d.error?`<div class="empty-state">${esc(d.error)}</div>`:d.versions.length?`<div class="mod-version-list">${d.versions.map((v,i)=>`<label class="mod-version-option"><input type="radio" name="modVersion" value="${esc(v.id)}" ${i===0?'checked':''}><span><strong>${esc(v.name)}</strong><small>${esc(v.number)} · ${esc(v.date)}</small></span></label>`).join('')}</div>`:'<div class="empty-state">没有找到兼容版本</div>'}`}<div class="install-actions"><button class="outline-btn" data-action="close-mod-dialog">取消</button><button class="save-button" data-action="confirm-mod-install" ${d.installed||(!pack&&(d.loading||d.error||!d.versions.length))?'disabled':''}>${d.installed?'已安装':'加入下载任务'} ${icon('chevron-right',16)}</button></div></section></div>`;
-}
-function archiveDialog() {
- const d=state.archiveDraft; if(!d) return '';
- if(d.kind==='export') return `<div class="install-overlay" data-action="close-archive-backdrop"><section class="install-dialog archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-title"><div class="install-dialog-head"><div><span class="section-index">EXPORT / GAME INSTANCE</span><h2 id="archive-title">导出 <em>${esc(d.version)}</em></h2><p>打包游戏数据，选择适合的导出格式。</p></div><button class="icon-button" data-action="close-archive" aria-label="关闭">${icon('x',19)}</button></div><div class="archive-details"><p>包含模组、配置、游戏设置和资源包，导入时联网获取游戏与加载器。</p><label class="archive-check"><input type="radio" name="archiveFormat" value="ccl" checked><span><strong>CCL 游戏包 · ZIP</strong><small>可在 CCL 导入，并保存启动参数。</small></span></label><label class="archive-check"><input type="radio" name="archiveFormat" value="pcl"><span><strong>PCL 兼容整合包 · MRPACK</strong><small>PCL 和 CCL 均可导入；不包含 CCL 启动参数，PCL 不支持 Quilt。</small></span></label><label class="archive-check"><input type="checkbox" id="archive-saves"><span><strong>包含世界存档</strong><small>存档可能较大；未勾选时不会导出 saves 文件夹。</small></span></label><p class="archive-hint">日志、截图和启动器账号不会打包。共用游戏目录的版本会导出该目录中的模组和配置。</p></div><div class="install-actions"><button class="outline-btn" data-action="close-archive">取消</button><button class="save-button" data-action="confirm-export">选择位置并导出 ${icon('chevron-right',16)}</button></div></section></div>`;
- const m=d.manifest;
- return `<div class="install-overlay" data-action="close-archive-backdrop"><section class="install-dialog archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-title"><div class="install-dialog-head"><div><span class="section-index">IMPORT / GAME INSTANCE</span><h2 id="archive-title">导入 <em>${esc(m.name)}</em></h2><p>创建独立游戏目录，不覆盖已有版本。</p></div><button class="icon-button" data-action="close-archive" aria-label="关闭">${icon('x',19)}</button></div><div class="archive-details"><div class="archive-summary"><div><small>游戏版本</small><strong>${esc(m.gameVersion)}</strong></div><div><small>加载器</small><strong>${esc(m.loader==='vanilla'?'原版':m.loader)} ${esc(m.loaderVersion || '')}</strong></div><div><small>世界存档</small><strong>${m.includeSaves?'包含':'不包含'}</strong></div></div><p>${m.format==='modrinth'?'将导入 PCL 兼容的 Modrinth 整合包；清单中的文件可能需要联网下载，可选客户端文件将一并安装。':'导入时会联网获取游戏本体和加载器；模组及配置来自导出包。'} Forge 系列需要可用的 Java。</p>${m.launchSettings?`<label class="archive-check"><input type="checkbox" id="archive-settings"><span><strong>同时导入启动参数</strong><small>将覆盖启动器当前的内存、优化和自定义参数设置。</small></span></label>`:''}</div><div class="install-actions"><button class="outline-btn" data-action="close-archive">取消</button><button class="save-button" data-action="confirm-import">加入导入任务 ${icon('chevron-right',16)}</button></div></section></div>`;
-}
-function diagnosticContent(crash) {
- const d=crash?.diagnosis;
- const title=typeof d?.title==='string'?d.title:'暂未识别出明确原因';
- const steps=Array.isArray(d?.steps)?d.steps.filter(s=>typeof s==='string').slice(0,4):['打开启动日志查看退出前的错误信息。'];
- const source=typeof d?.source==='string'?d.source:'启动日志';
- return `<div class="crash-diagnosis"><span>可能原因 · ${esc(source)}</span><strong>${esc(title)}</strong><ul>${steps.map(step=>`<li>${esc(step)}</li>`).join('')}</ul><small>诊断结果仅供参考，请结合完整日志确认。</small></div>`;
-}
-function crashDialog() {
- const crash=state.crashDialog;if(!crash)return '';
- return `<div class="confirm-overlay crash-overlay"><section class="confirm-box crash-dialog" role="dialog" aria-modal="true" aria-labelledby="crash-dialog-title"><span class="section-index">GAME / DIAGNOSIS</span><h3 id="crash-dialog-title">游戏异常退出</h3><p>${esc(crash.version)} · 退出代码 ${esc(crash.code ?? '未知')}</p>${diagnosticContent(crash)}<div><button class="outline-btn" data-action="close-crash-dialog">关闭</button><button class="save-button" data-action="open-crash-log">打开启动日志</button></div></section></div>`;
-}
-function launchScreen() {
- const v=state.launchView; if(!v) return '';
- const failed=v.phase==='failed',waiting=v.phase==='waiting',authenticating=v.phase==='authenticating';
- return `<div class="launch-screen ${failed?'launch-failed':''}" data-launch-id="${esc(v.id)}" role="status" aria-live="polite"><div class="launch-stage"><div class="launch-album" aria-hidden="true"><div class="launch-disc-window"><div class="launch-disc"><div class="launch-disc-rotor"></div><div class="launch-disc-hub"></div></div></div><div class="launch-sleeve"><div class="launch-cover"></div><div class="launch-default-art"><i></i><i></i><i></i></div></div></div><div class="launch-screen-copy"><div class="launch-copy-header"><div><span class="launch-eyebrow">CCL / MINECRAFT</span><h2>${failed?'启动遇到问题':authenticating?'正在验证正版账户':waiting?'等待游戏窗口':'正在准备游戏'}</h2></div><span class="launch-version-label">${esc(v.version)}</span></div><p>${failed?esc(v.error):v.warning?esc(v.warning):authenticating?'正在恢复微软账户登录，请稍候。':waiting?'游戏进程已启动，正在等待游戏窗口出现。':'正在准备游戏环境并启动 Java，请稍候。'}</p>${failed&&v.crash?.diagnosis?diagnosticContent(v.crash):''}<div class="launch-progress ${failed?'failed':'preparing'}"><i></i></div><div class="launch-screen-actions">${failed&&v.authError?'<button class="save-button" data-action="launch-account">账户与外观</button>':failed&&v.crash?'<button class="save-button" data-action="open-crash-log">打开启动日志</button>':waiting?'<button class="outline-btn" data-action="open-log">查看启动日志</button>':''}<button class="outline-btn" data-action="close-launch-view">返回主页</button></div></div></div></div>`;
-}
+function updateProjectLinks() { if(state.modDraft && app.querySelector('.mod-dialog')) renderOverlay(); }
+function updateProjectDescription() { if(state.modDraft && app.querySelector('.mod-dialog')) renderOverlay(); }
 let accountListRevision=0;
 async function refreshAccountList() {
  const revision=++accountListRevision;
  try { const accounts=await invoke('list_microsoft_accounts');if(revision!==accountListRevision)return;state.savedAccounts=Array.isArray(accounts)?accounts.filter(a=>typeof a?.uuid==='string' && typeof a?.name==='string'):[];if(state.page==='account')render(); } catch { /* Existing account remains usable when the credential store is unavailable. */ }
-}
-function accountPage() {
- const signed=!!state.account, online=state.accountMode==='microsoft' && signed, pendingOnline=usingOnlineAccount() && !signed;
- const localSkin=state.localSkin, localCape=state.localCape, capes=state.appearance?.capes || [];
- const hasSkin=!!(localSkin?.data || state.appearance?.skin);
- return `<div class="page-heading inner-heading"><div><h1>账户与外观</h1><p>登录正版账户，预览和管理角色外观。</p></div></div>
- <div class="identity-layout"><div class="identity-main"><section class="identity-card"><div class="identity-section-head"><div><h2>玩家账户</h2><p>${online ? '当前使用微软正版账户。' : pendingOnline ? '正在使用已选择的正版账户，启动游戏时会验证登录。' : '当前使用离线账户。'}</p></div><span class="identity-status ${online?'online':''}">${online?'正版':pendingOnline?'待验证':'离线'}</span></div>
- <div class="identity-account"><div class="identity-user-icon">${icon('user-round',20)}</div><div><strong>${esc((online||pendingOnline)?playerName():state.username)}</strong><small>${online ? `Minecraft Java · ${esc(state.account.uuid)}` : pendingOnline ? (state.accountRestoring?'正在后台恢复登录':'启动时验证登录') : '离线模式'}</small></div></div>
- ${state.savedAccounts.length?`<div class="saved-account-list">${state.savedAccounts.map(a=>`<button type="button" class="row-button ${a.uuid===state.account?.uuid?'selected':''}" data-switch-account="${esc(a.uuid)}" ${state.accountBusy||state.accountRestoring||state.loginAttempt?'disabled':''}>${esc(a.name)}${a.uuid===state.account?.uuid?' · 当前':''}</button>`).join('')}</div>`:''}
- <div class="identity-actions">${signed || state.accountKnown ? `<button class="row-button ${!usingOnlineAccount()?'selected':''}" data-action="use-offline">使用离线账户</button><button class="row-button ${usingOnlineAccount()?'selected':''}" data-action="use-microsoft">使用 ${esc(state.account?.name || state.accountName || '正版账户')}</button>${!signed?`<button class="row-button" data-action="begin-login" ${state.accountBusy||state.accountRestoring?'disabled':''}>重新登录</button>`:''}<button class="row-button" data-action="begin-login" ${state.accountBusy||state.accountRestoring||state.loginAttempt?'disabled':''}>添加正版账户</button><button class="row-button danger-button" data-action="logout-microsoft" ${state.accountBusy?'disabled':''}>退出登录</button>` : `<button class="save-button" data-action="begin-login" ${state.accountBusy||state.accountRestoring?'disabled':''}>${state.accountRestoring?'正在恢复登录…':'微软账户登录'}</button>`}</div>
- ${signed && state.account.remembered===false ? `<p class="identity-note">登录状态尚未保存：${esc(state.account.rememberError || '请检查系统凭据库是否可用。')} <button class="text-link" data-action="retry-save-account" ${state.accountBusy?'disabled':''}>重试保存</button></p>`:''}
- ${!signed && state.accountRestoreError ? `<p class="identity-note">${esc(state.accountRestoreError)} <button class="text-link" data-action="retry-account-restore" ${state.accountRestoring?'disabled':''}>重试恢复</button> <button class="text-link" data-action="continue-offline">使用离线账户</button></p>` : ''}
- ${state.loginAttempt ? `<div class="browser-login-panel"><div class="browser-login-icon">${icon('globe-2',20)}</div><div><strong>${state.browserPrompt ? (state.browserPrompt.opened?'请在浏览器中登录':'无法自动打开浏览器') : '正在准备登录…'}</strong><p>${state.browserPrompt ? (state.browserPrompt.opened?'完成微软授权后，将自动返回启动器。':'请检查系统默认浏览器，然后重试。') : '正在启动系统浏览器。'}</p><div class="identity-actions">${state.browserPrompt?'<button class="row-button" data-action="open-microsoft-login">重新打开浏览器</button>':''}<button class="row-button" data-action="cancel-login">取消登录</button></div></div></div>` : ''}</section>
- <section class="identity-card"><div class="identity-section-head"><div><h2>皮肤</h2><p>选择 PNG 文件预览，登录后可应用到正版账户。</p></div><button class="row-button" data-action="choose-skin" ${state.accountBusy?'disabled':''}>选择皮肤</button></div><div class="skin-controls"><div class="skin-source"><strong>${esc(localSkin?.name || (state.appearance?.skin ? '当前账户皮肤' : signed ? '账户默认皮肤' : '尚未选择皮肤'))}</strong><small>${localSkin?'本地预览 · 尚未应用':state.appearance?.skin?'已从账户加载':signed?'暂无可预览的纹理':'请选择皮肤图片'}</small></div><label>模型<select id="skin-model"><option value="classic" ${state.skinModel==='classic'?'selected':''}>标准</option><option value="slim" ${state.skinModel==='slim'?'selected':''}>纤细</option></select></label>${localSkin?`<button class="row-button" data-action="clear-skin">清除预览</button><button class="save-button" data-action="upload-skin" ${!signed||state.accountBusy?'disabled':''}>应用到正版账户</button>`:''}</div><p class="identity-note">支持 64×64 或 64×32 PNG。离线游戏内显示需要为目标版本安装 CustomSkinLoader；本地皮肤仅在安装该组件的客户端可见，皮肤来源优先级也会影响结果。</p>${!usingOnlineAccount() && localSkin && selected()?.installed?`<div class="identity-actions"><button class="row-button" data-action="apply-offline-skin" ${state.accountBusy?'disabled':''}>应用到 ${esc(selected().name || selected().id)}</button><button class="row-button" data-action="find-offline-skin-mod">查找皮肤组件</button></div><p class="identity-note">应用会覆盖该游戏目录中当前玩家的同名本地皮肤；以后启动此版本时同步当前选择的皮肤。清除预览不会删除已写入的皮肤文件。</p>`:''}${signed?`<button class="text-link" data-action="reset-skin" ${state.accountBusy?'disabled':''}>恢复账户默认皮肤</button>`:''}</section>
- <section class="identity-card"><div class="identity-section-head"><div><h2>披风</h2><p>切换账户已有披风，或预览本地图片。</p></div><button class="row-button" data-action="choose-cape" ${state.accountBusy?'disabled':''}>预览本地披风</button></div>${localCape?`<div class="local-cape"><span>${esc(localCape.name)} · 仅预览</span><button class="row-button" data-action="clear-cape">清除预览</button></div>`:''}<div class="cape-list">${signed ? capes.length ? capes.map((cape,i)=>`<div class="cape-row ${state.previewCapeId===cape.id&&!localCape?'cape-previewed':''}"><div><strong>${esc(cape.name)}</strong><small>${cape.active?'当前使用':''}</small></div><button class="row-button" data-preview-cape="${i}" ${!cape.texture?'disabled':''}>预览</button><button class="row-button ${cape.active?'selected':''}" data-apply-cape="${i}" ${cape.active||state.accountBusy?'disabled':''}>${cape.active?'已使用':'使用'}</button></div>`).join('') : '<p class="identity-empty">账户暂无可用披风。</p>' : '<p class="identity-empty">登录后可管理账户拥有的披风。</p>'}</div>${signed && capes.some(c=>c.active)?`<button class="text-link" data-action="hide-cape" ${state.accountBusy?'disabled':''}>不使用披风</button>`:''}<p class="identity-note">正版披风由 Minecraft 账户授予，本地图片仅用于预览。</p></section></div>
- <aside class="identity-preview"><div class="preview-headline"><strong>角色预览</strong><span>${state.skinModel==='slim'?'纤细':'标准'}模型</span></div><div class="preview-stage"><canvas id="skin-preview" aria-label="Minecraft 角色皮肤与披风预览" ${hasSkin?'':'hidden'}></canvas><div class="preview-empty" ${hasSkin?'hidden':''}>${localCape || state.previewCapeId ? '请先选择皮肤以预览披风' : '选择皮肤后显示预览'}</div><div class="preview-fallback" hidden>当前环境无法显示预览</div></div><p class="preview-caption">${hasSkin ? `拖动角色可旋转 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}` : '暂无皮肤预览'}</p></aside></div>`;
 }
 let viewer=null, previewGeneration=0;
 function refreshPreview() {
@@ -593,7 +394,7 @@ function refreshPreview() {
  const cape=state.localCape?.data || state.appearance?.capes?.find(c=>c.id===state.previewCapeId)?.texture || null;
  const skin=state.localSkin?.data || state.appearance?.skin || null;
  if(!skin) return;
- import('./appearance-preview.js').then(m=>m.createAppearancePreview(canvas,skin,cape,state.skinModel)).then(next=>{if(generation!==previewGeneration) next.dispose(); else { viewer=next; if(next.is2d) { const caption=app.querySelector('.preview-caption'); if(caption) caption.textContent=`2D 预览 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}`; } }}).catch(()=>{if(generation===previewGeneration) { const el=app.querySelector('.preview-fallback'); if(el) el.hidden=false; }});
+ import('./appearance-preview.ts').then(m=>m.createAppearancePreview(canvas,skin,cape,state.skinModel)).then(next=>{if(generation!==previewGeneration) next.dispose(); else { viewer=next; if(next.is2d) { const caption=app.querySelector('.preview-caption'); if(caption) caption.textContent=`2D 预览 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}`; } }}).catch(()=>{if(generation===previewGeneration) { const el=app.querySelector('.preview-fallback'); if(el) el.hidden=false; }});
 }
 let appearanceRequest=null;
 function refreshAppearance({reuse=false}={}) {
@@ -619,8 +420,8 @@ async function refreshInstalled(dir) {
   if (state.page==='versions' || state.page==='home') render(); else renderChrome();
  } catch (e) { flash(`无法刷新已安装版本：${e}`,'error'); }
 }
-const { downloadsPage, saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, enqueueJob, pumpJobs, requestJobCancel, jobEvent, queueVersion, activeJobCount } = createJobManager({
- state, app, invoke, persist, esc, icon, hydrateIcons, renderChrome, flash, render, refreshInstalled,
+const { saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, enqueueJob, pumpJobs, requestJobCancel, jobEvent, queueVersion, activeJobCount } = createJobManager({
+ state, invoke, persist, renderChrome, flash, render, refreshInstalled, renderDownloads,
  onJobFinished: async job => {
   if(['resourcepack','shader'].includes(job.kind) && job.version===state.contentTarget && job.gameDir===state.gameDir && state.contentKind===job.kind) { contentEpoch++; state.contentLoaded=false; if(state.page==='content') await Promise.all([refreshPacks(),searchContent()]); }
   if (job.kind==='mod' && job.version===state.contentTarget && job.gameDir===state.gameDir) {
@@ -639,49 +440,53 @@ let renderedPage = null;
 let composingSearch = false;
 let pendingCompositionRender = false;
 function renderChrome() {
- renderUpdateChrome();
- renderAvatar();
- const root = app.querySelector('#toast-root'); if (!root) return;
- root.innerHTML = state.notice ? `<div class="toast ${state.noticeKind}">${esc(state.notice)}${state.crash && state.noticeCrash ? '<button class="toast-log" data-action="open-crash-diagnosis">查看诊断</button><button class="toast-log" data-action="open-crash-log">查看日志</button>' : ''}<button data-action="dismiss" aria-label="关闭">${icon('x',15)}</button></div>` : '';
- const badge = app.querySelector('.job-badge'); if (badge) { const n = activeJobCount(); badge.textContent = n ? String(n) : ''; badge.classList.toggle('has-jobs', !!n); }
- const cancelAll=app.querySelector('[data-action="cancel-all-jobs"]');if(cancelAll)cancelAll.disabled=!state.jobs.some(j=>j.status==='queued'||j.status==='running');
- const footer = app.querySelector('.side-footer'); if (footer) footer.innerHTML = `<span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v${esc(appVersion)}</span>`;
- const count = app.querySelector('.side-card strong'); if (count) count.innerHTML = `${String(state.versions.filter(v=>v.installed).length).padStart(2,'0')} <small>个版本</small>`;
- hydrateIcons();
+ renderShell();
+ if(state.page==='settings' && app.querySelector('#update-panel'))renderSettingsPage();
 }
 function renderOverlay() {
  const root=app.querySelector('#modal-root');if(!root)return;
- const current=root.querySelector('.launch-screen');
- if(state.launchView && current?.dataset.launchId===state.launchView.id) {
-  const template=document.createElement('template');template.innerHTML=launchScreen();
-  const next=template.content.querySelector('.launch-screen');
-  current.classList.toggle('launch-failed',state.launchView.phase==='failed');
-  current.querySelector('.launch-screen-copy').innerHTML=next.querySelector('.launch-screen-copy').innerHTML;
- } else if(state.instanceSettingsView && root.querySelector('.instance-settings-dialog') && !state.launchView && !state.crashDialog) {
-  // Keep unsaved edits intact when background activity refreshes the overlay.
- } else if(state.instanceSettingsView && !state.launchView && !state.crashDialog) {
+ if(state.launchView) {
+  renderer.overlay(LaunchScreen,{view:state.launchView},`launch:${state.launchView.id}`);
+ } else if(state.crashDialog) {
+  renderer.overlay(CrashDialog,{crash:state.crashDialog}); } else if(state.instanceSettingsView && !state.launchView && !state.crashDialog) {
   const d=state.instanceSettingsView,savedSettings=getLaunchSettings(d.gameDir,d.version);
-  renderer.overlay('',InstanceSettingsDialog,{name:d.name,values:{...state,...savedSettings},saved:savedSettings,runtimes:Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]});
+  renderer.overlay(InstanceSettingsDialog,{name:d.name,values:{...state,...savedSettings},saved:savedSettings,runtimes:Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]},`instance-settings:${d.version}`);
+ } else if(state.themeView) {
+  const d=state.themeView,cover=d.preview||(!d.removeCover?instanceCovers.get(instanceKey(d.gameDir,d.version)):null)||null;
+  renderer.overlay(InstanceThemeDialog,{draft:d,cover,colors:instanceColors});
+ } else if(state.profileView) {
+  renderer.overlay(GameProfileDialog,{view:state.profileView},`profile:${state.profileView.version}`);
+ } else if(state.manageView) {
+  renderer.overlay(ManageDialog,{view:state.manageView});
  } else if(state.instanceView && !state.launchView && !state.crashDialog && !state.themeView && !state.profileView && !state.manageView) {
-  renderer.overlay('',InstanceOverviewDialog,{view:state.instanceView});
- } else renderer.overlay(state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '');
+  renderer.overlay(InstanceOverviewDialog,{view:state.instanceView});
+ } else if(state.installDraft && !state.themeView && !state.profileView && !state.manageView && !state.instanceView) {
+  renderer.overlay(InstallDialog,{draft:state.installDraft,addons:ADDONS});
+ } else if(state.archiveDraft && !state.themeView && !state.profileView && !state.manageView && !state.instanceView && !state.modDraft) {
+  renderer.overlay(ArchiveDialog,{draft:state.archiveDraft});
+ } else if(state.modDraft) {
+  renderer.overlay(ContentDialog,{draft:state.modDraft,shaderEnv:state.shaderEnv,shaderEnvLoading:state.shaderEnvLoading},`content:${state.modDraft.source}:${state.modDraft.projectId}`);
+ } else renderer.overlay();
  syncMemoryControls();
- if(state.profileView)paintProfileImages(state.profileView);
- hydrateIcons();
+
 }
 function renderPage() {
- if(state.page==='home'){const v=selected();renderer.page('',HomePage,{version:v,versionIcon:versionIcon(v,'version-cube'),description:v?.installed?getInstanceTheme(state.gameDir,v.id).description:''});return;}
- if(state.page==='versions' && !state.versionDelete){renderer.page('',VersionsPage,{versions:state.versions,query:state.versionQuery,selected:state.selected,loading:state.loading,versionIcon});return;}
- if(state.page==='java'){renderer.page('',JavaPage,{runtimes:state.javaRuntimes,javaPath:state.javaPath,loading:state.javaLoading,deleteIndex:state.javaDelete,hasJob});return;}
- if(state.page==='multiplayer' && state.lanView==='room'){renderer.page('',LanRoomPage,{room:state.lanRoom,busy:state.lanBusy,addresses:state.lanAddresses,port:state.lanPort,target:state.lanTarget,test:state.lanTest});return;}
+ if(state.page==='home'){const v=selected();renderer.page(HomePage,{version:v,visual:versionVisual(v),description:v?.installed?getInstanceTheme(state.gameDir,v.id).description:''});return;}
+ if(state.page==='versions'){renderVersionsPage();return;}
+ if(state.page==='java'){renderer.page(JavaPage,{runtimes:state.javaRuntimes,javaPath:state.javaPath,loading:state.javaLoading,deleteIndex:state.javaDelete,hasJob});return;}
+ if(state.page==='content'){renderContentPage();return;}
+ if(state.page==='downloads'){renderDownloads();return;}
+ if(state.page==='settings'){renderSettingsPage();return;}
+ if(state.page==='account'){renderer.page(AccountPage,{state,usingOnline:usingOnlineAccount(),playerName:playerName(),selected:selected()});return;}
+ if(state.page==='multiplayer' && state.lanView==='room'){renderer.page(LanRoomPage,{room:state.lanRoom,busy:state.lanBusy,addresses:state.lanAddresses,port:state.lanPort,target:state.lanTarget,test:state.lanTest});return;}
  if(state.page==='multiplayer' && state.lanView==='servers'){renderServerPage();return;}
- renderer.page(state.page === 'versions' ? versionsPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : settingsPage());
+ renderer.page();
 }
 function render() {
  if(composingSearch && renderedPage===state.page) { pendingCompositionRender=true;return; }
  if(composingSearch && renderedPage!==state.page) { composingSearch=false;pendingCompositionRender=false; }
  const first = !app.querySelector('.app-shell');
- if (first) { renderer.mount(shell()); renderPage(); }
+ if (first) { renderer.mount(Shell,shellProps()); renderPage(); }
  else {
   const content = app.querySelector('.content');
   const same = renderedPage === state.page;
@@ -693,21 +498,23 @@ function render() {
   for (const saved of values) { const el = [...content.querySelectorAll('form input, form select')].find(x => x.name === saved.name && x.type === saved.type); if (el) { el.value = saved.value; if (el.type === 'checkbox' || el.type === 'radio') el.checked = saved.checked; } }
   if (focus) { const el = [...content.querySelectorAll('input, select')].find(x => focus.id ? x.id === focus.id : x.name === focus.name); if (el) { el.focus({preventScroll:true}); if (focus.start != null && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(focus.start, focus.end); } catch {} } } }
   if(same && main){main.scrollTop=scrollTop;main.scrollLeft=scrollLeft;docScroll.scrollTop=docTop;docScroll.scrollLeft=docLeft;}
-  app.querySelectorAll('.nav [data-page]').forEach(el => el.classList.toggle('active', el.dataset.page === state.page));
-  app.querySelector('.breadcrumbs strong').textContent = ({home:'启动游戏',versions:'版本管理',content:'模组与资源',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'})[state.page];
-  app.querySelector('.profile strong').textContent = playerName(); app.querySelector('.profile small').textContent = playerStatus();
  }
- renderedPage = state.page; syncMemoryControls(); applyTheme(); renderChrome(); if(!(state.modDraft && app.querySelector("#modal-root .mod-dialog")) && !(state.archiveDraft && app.querySelector("#modal-root .archive-dialog"))) renderOverlay(); hydrateIcons(); hydrateThumbnails(); refreshPreview();
+ renderedPage = state.page; syncMemoryControls(); applyTheme(); renderChrome(); if(!(state.modDraft && app.querySelector("#modal-root .mod-dialog")) && !(state.archiveDraft && app.querySelector("#modal-root .archive-dialog"))) renderOverlay(); hydrateThumbnails(); refreshPreview();
+}
+function renderSettingsPage() {
+ renderer.page(SettingsPage,{...state,version:appVersion,selectedVersion:state.versions.find(v=>v.id===state.selected && v.installed),theme},'settings');
+}
+function renderDownloads() {
+ if(!app.querySelector('#job-list') && state.page!=='downloads')return;
+ renderer.page(DownloadsPage,{jobs:state.jobs,limit:state.jobLimit},'downloads');
 }
 function renderServerPage() {
- renderer.page('',PublicServersPage,{catalog:state.serverCatalog,filtered:filteredServers(),query:state.serverQuery,status:state.serverStatus,page:state.serverPage,loading:state.serverLoading,error:state.serverError},'public-servers');
+ renderer.page(PublicServersPage,{catalog:state.serverCatalog,filtered:filteredServers(),query:state.serverQuery,status:state.serverStatus,page:state.serverPage,loading:state.serverLoading,error:state.serverError},'public-servers');
 }
+function renderVersionsPage() { renderer.page(VersionsPage,{versions:state.versions,query:state.versionQuery,selected:state.selected,loading:state.loading,versionVisual,deleteVersion:state.versionDelete,deleting:state.versionDeleting},'versions'); }
 function updateSearchResults(kind) {
  if(kind==='server') {renderServerPage();hydrateThumbnails();return;}
- const content=app.querySelector('.content');if(!content)return;
- const preview=document.createElement('div');preview.innerHTML=versionsPage();
- for(const selector of ['.version-list','.version-toolbar .count']) { const old=content.querySelector(selector),next=preview.querySelector(selector);if(old&&next) old.replaceWith(next); }
- hydrateIcons();hydrateThumbnails();
+ renderVersionsPage();
 }
 async function refresh() {
  state.loading = true; render();
@@ -729,7 +536,7 @@ app.addEventListener('click', async event => {
  const profilePage=event.target.closest('[data-profile-page]');if(profilePage&&state.profileView&&!state.profileView.loading){const d=state.profileView,n=Number(profilePage.dataset.profilePage);if(n>=0&&(n<d.page||d.hasMore)){d.page=n;d.preview=null;await loadProfileScreenshots(d);}return;}
  const profileShot=event.target.closest('[data-profile-shot]');if(profileShot&&state.profileView){const d=state.profileView,index=Number(profileShot.dataset.profileShot),data=d.images[index];if(data){d.preview={data,name:d.shots[index].name};renderOverlay();}return;}
  const instanceSettingsButton=event.target.closest('[data-instance-settings]');
- if(instanceSettingsButton){const version=instanceSettingsButton.dataset.instanceSettings,item=state.versions.find(v=>v.id===version&&v.installed);if(!item)return;const menu=instanceSettingsButton.closest('details');if(menu)menu.open=false;const view={version,gameDir:state.gameDir,name:item.name||version};state.instanceSettingsView=view;renderOverlay();void invoke('list_java').then(runtimes=>{if(state.instanceSettingsView!==view || !Array.isArray(runtimes))return;state.javaRuntimes=runtimes;const list=app.querySelector('#instance-java-list');if(list)list.innerHTML=instanceJavaOptions();}).catch(()=>{});return;}
+ if(instanceSettingsButton){const version=instanceSettingsButton.dataset.instanceSettings,item=state.versions.find(v=>v.id===version&&v.installed);if(!item)return;const menu=instanceSettingsButton.closest('details');if(menu)menu.open=false;const view={version,gameDir:state.gameDir,name:item.name||version};state.instanceSettingsView=view;renderOverlay();void invoke('list_java').then(runtimes=>{if(state.instanceSettingsView!==view || !Array.isArray(runtimes))return;state.javaRuntimes=runtimes;renderOverlay();}).catch(()=>{});return;}
  const themeButton=event.target.closest('[data-instance-theme]');if(themeButton){const version=themeButton.dataset.instanceTheme,item=state.versions.find(v=>v.id===version&&v.installed);if(item){const original=getInstanceTheme(state.gameDir,version);state.themeView={version,gameDir:state.gameDir,name:item.name||version,...original,file:null,preview:null,removeCover:false,error:'',saving:false};renderOverlay();await loadInstanceCover(state.gameDir,version);if(state.themeView?.version===version)renderOverlay();}return;}
  const colorButton=event.target.closest('[data-instance-color]');if(colorButton&&state.themeView&&!state.themeView.saving&&instanceColors.includes(colorButton.dataset.instanceColor)){state.themeView.color=colorButton.dataset.instanceColor;renderOverlay();return;}
  const manageButton=event.target.closest('[data-manage-backups],[data-manage-worlds]');if(manageButton){await openManage(manageButton.hasAttribute('data-manage-backups')?'backups':'worlds',manageButton.dataset.manageBackups||manageButton.dataset.manageWorlds);return;}
@@ -857,7 +664,7 @@ app.addEventListener('click', async event => {
  if (action === 'refresh-java') await refreshJava();
  if(action==='refresh-packs') await refreshPacks();
  if(action==='open-pack-folder' && state.contentTarget) {try{await invoke('open_pack_folder',{gameDir:state.gameDir,version:state.contentTarget,kind:state.contentKind});}catch(e){flash(`无法打开文件夹：${e}`,'error');}}
- if(action==='find-shader-support') {state.contentKind='mod';state.contentQuery=event.target.closest('[data-query]')?.dataset.query||'Iris';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];packEpoch++;state.packDelete=null;render();await searchContent();}
+ if(action==='find-shader-support') {state.contentKind='mod';state.contentQuery=event.target.closest('[data-query]')?.dataset.query||'Iris';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];packEpoch++;state.packDelete=null;const query=app.querySelector('#content-form [name=query]');if(query)query.value=state.contentQuery;render();await searchContent();}
  if(action==='cancel-pack-remove') {state.packDelete=null;render();}
  if(action==='confirm-pack-remove' && state.packDelete && !state.packWorking) {const item=state.packDelete;state.packDelete=null;state.packWorking=true;render();try{await invoke('remove_local_pack',item);flash('资源包已删除。');if(item.version===state.contentTarget&&item.gameDir===state.gameDir&&item.kind===state.contentKind){await refreshPacks();contentEpoch++;state.contentLoaded=false;await searchContent();}}catch(e){flash(`删除失败：${e}`,'error');}finally{state.packWorking=false;if(state.page==='content')render();}}
  if(action==='check-pack-updates' && !state.packChecking && !state.packWorking && state.contentTarget) {const version=state.contentTarget,gameDir=state.gameDir,kind=state.contentKind,epoch=packEpoch;state.contentKey=String(app.querySelector('#content-form [name=apiKey]')?.value || state.contentKey).trim();state.packChecking=true;state.packUpdates=null;renderLocalPacks();try{const result=await invoke('check_pack_updates',{gameDir,version,kind,apiKey:state.contentKey});if(epoch===packEpoch && version===state.contentTarget && gameDir===state.gameDir && kind===state.contentKind)state.packUpdates=result;}catch(e){flash(`检查更新失败：${e}`,'error');}finally{state.packChecking=false;renderLocalPacks();}}
@@ -916,7 +723,7 @@ app.addEventListener('change', async event => {
 });
 app.addEventListener('compositionstart', event => { if(event.target.matches('input, textarea')) composingSearch=true; });
 app.addEventListener('compositionend', event => { if(!composingSearch)return;composingSearch=false; if(event.target.id==='server-search') {state.serverQuery=event.target.value;state.serverPage=0;} else if(event.target.id==='version-filter') state.versionQuery=event.target.value; else if(event.target.id==='local-mod-search') state.modQuery=event.target.value; else if(event.target.id==='local-pack-search') state.packQuery=event.target.value; if(pendingCompositionRender) {pendingCompositionRender=false;render();} else if(event.target.id==='server-search'||event.target.id==='version-filter') updateSearchResults(event.target.id==='server-search'?'server':'version'); else if(event.target.id==='local-mod-search') renderLocalMods(); else if(event.target.id==='local-pack-search') renderLocalPacks(); });
-app.addEventListener('input', event => { if(event.target.id==='instance-description' && state.themeView){state.themeView.description=event.target.value;return;} if(event.target.id==='local-pack-search') {if(composingSearch||event.isComposing)return;state.packQuery=event.target.value;renderLocalPacks();return;} if(event.target.id==='local-mod-search') {if(composingSearch||event.isComposing)return;state.modQuery=event.target.value;renderLocalMods();return;} if(event.target.dataset.themeSetting) { const key=event.target.dataset.themeSetting;theme[key]=clampAppearance(event.target.value,appearanceDefaults[key],key.endsWith('Blur')?30:100);event.target.closest('.theme-control').querySelector('output').textContent=`${theme[key]}${key.endsWith('Blur')?' px':'%'}`;applyTheme();persist();return; } if(event.target.id==='server-search') { if(composingSearch || event.isComposing) return; state.serverQuery=event.target.value;state.serverPage=0;updateSearchResults('server');return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { if(composingSearch || event.isComposing) return; state.versionQuery=event.target.value; updateSearchResults('version'); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if(event.target.id==='instance-memory-range') {const input=app.querySelector('#instance-memory');if(input)input.value=event.target.value;} else if(event.target.id==='instance-memory') {const slider=app.querySelector('#instance-memory-range');if(slider && event.target.value)slider.value=event.target.value;} else if(event.target.id==='memory-range') {const input=app.querySelector('#memory');if(input)input.value=event.target.value;} else if(event.target.id==='memory') {const slider=app.querySelector('#memory-range');if(slider && event.target.value)slider.value=event.target.value;} });
+app.addEventListener('input', event => { if(event.target.id==='instance-description' && state.themeView){state.themeView.description=event.target.value;return;} if(event.target.id==='local-pack-search') {if(composingSearch||event.isComposing)return;state.packQuery=event.target.value;renderLocalPacks();return;} if(event.target.id==='local-mod-search') {if(composingSearch||event.isComposing)return;state.modQuery=event.target.value;renderLocalMods();return;} if(event.target.dataset.themeSetting) { const key=event.target.dataset.themeSetting;theme[key]=clampAppearance(event.target.value,appearanceDefaults[key],key.endsWith('Blur')?30:100);if(state.page==='settings')renderSettingsPage();applyTheme();persist();return; } if(event.target.id==='server-search') { if(composingSearch || event.isComposing) return; state.serverQuery=event.target.value;state.serverPage=0;updateSearchResults('server');return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { if(composingSearch || event.isComposing) return; state.versionQuery=event.target.value; updateSearchResults('version'); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if(event.target.id==='instance-memory-range') {const input=app.querySelector('#instance-memory');if(input)input.value=event.target.value;} else if(event.target.id==='instance-memory') {const slider=app.querySelector('#instance-memory-range');if(slider && event.target.value)slider.value=event.target.value;} else if(event.target.id==='memory-range') {const input=app.querySelector('#memory');if(input)input.value=event.target.value;} else if(event.target.id==='memory') {const slider=app.querySelector('#memory-range');if(slider && event.target.value)slider.value=event.target.value;} });
 app.addEventListener('submit', async event => { if(event.target.id==='instance-settings-form') {
  event.preventDefault();const form=event.target,view=state.instanceSettingsView;if(!view)return;
  if(view.gameDir!==state.gameDir || !state.versions.some(v=>v.id===view.version && v.installed)){flash('实例已变更或不存在，请重新打开设置。','error');return;}

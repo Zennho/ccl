@@ -11,7 +11,7 @@ function boot(){
  w.setInterval=()=>0;w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async(name,callback)=>{listeners[name]=callback;return ()=>{};};w.openDialog=async()=>null;w.saveDialog=async()=>null;
  w.invoke=async(name,args={})=>{calls.push({name,args});if(name==='list_versions'||name==='installed_versions')return [{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}];if(name==='launch_game')return '/game/logs/ccl/launch-1.log';if(name==='list_mods')return [];return null;};
  w.appVersion=require('../package.json').version;
- w.eval(fs.readFileSync(path.join(__dirname,'../src/job-manager.js'),'utf8').replace('export function createJobManager','function createJobManager'));
+ w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
  const src=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');w.eval(src);
  const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};
  return {w,calls,listeners,click,close:()=>w.close()};

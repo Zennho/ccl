@@ -34,7 +34,7 @@ function boot(options={}){
   return Promise.resolve();
  };
  w.appVersion=require('../package.json').version;
- w.eval(fs.readFileSync(path.join(__dirname,'../src/job-manager.js'),'utf8').replace('export function createJobManager','function createJobManager'));
+ w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
  const src=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');w.eval(src);
  const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};
  const change=(selector,value)=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.value=value;el.dispatchEvent(new w.Event('change',{bubbles:true}));};
@@ -198,4 +198,20 @@ test('instance backup and world management use the selected version and confirm 
 
 test('reports mod conflict findings and unknown files',async()=>{
  const app=boot();try {await tick();app.click('[data-page=content]');await tick();app.click('[data-action=check-mod-conflicts]');await tick();assert.match(app.w.document.querySelector('#mod-conflict-report').textContent,/缺少依赖 example/);assert.match(app.w.document.querySelector('#mod-conflict-report').textContent,/1 个文件无法识别/);assert.equal(app.calls.findLast(c=>c.name==='check_mod_conflicts').args.version,'1.20.1');}finally{app.close();}
+});
+
+
+test('keeps a selected version when project details finish loading asynchronously',async()=>{
+ let resolveTranslation;
+ const app=boot({translate:()=>new Promise(resolve=>{resolveTranslation=resolve;})});
+ try {
+  await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','resourcepack');await tick();await tick();
+  app.click('[data-content-install="0"]');await tick();
+  const second=app.w.document.querySelector('[name=modVersion][value=pack2]');assert.ok(second);second.checked=true;
+  resolveTranslation('中文介绍');await tick();
+  assert.strictEqual(app.w.document.querySelector('[name=modVersion][value=pack2]'),second);
+  assert.equal(second.checked,true);
+  app.click('[data-action=confirm-mod-install]');await tick();
+  assert.equal(app.calls.findLast(c=>c.name==='install_pack').args.packVersionId,'pack2');
+ } finally {app.close();}
 });
