@@ -2988,7 +2988,8 @@ mod tests {
 
     #[test]
     fn packs_validate_files_and_preserve_existing_data() {
-        let dir = std::env::temp_dir().join(format!("ccl-pack-test-{}", std::process::id()));
+        let dir =
+            std::env::temp_dir().join(format!("ccl-pack-validation-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let resource = pack_archive("pack.mcmeta");
@@ -3263,7 +3264,8 @@ mod tests {
 
     #[test]
     fn pack_overrides_cannot_escape_the_instance() {
-        let root = std::env::temp_dir().join(format!("ccl-pack-test-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("ccl-pack-overrides-test-{}", std::process::id()));
         fs::create_dir_all(&root).unwrap();
         let data = archive("overrides/config/test.txt");
         let manifest = read_pack_manifest(&data, "modrinth").unwrap();
