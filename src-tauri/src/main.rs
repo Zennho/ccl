@@ -1219,6 +1219,8 @@ fn main() {
             content::content_links,
             content::curseforge_description,
             content::list_mod_versions,
+            content::list_pack_versions,
+            content::install_pack,
             content::list_mods,
             content::check_mod_updates,
             content::set_mod_enabled,

@@ -20,6 +20,7 @@ function runnerFor(recipe) {
  if(!recipe || typeof recipe!=='object') return null;
  if(recipe.type==='java') return async job=>{const java=await invoke('install_java',{major:recipe.major,jobId:job.id});if(state.javaPath==='java'||!state.javaPath){state.javaPath=java.path;persist();}};
  if(recipe.type==='game') return job=>runGameJob(job,recipe.draft,recipe.gameDir,recipe.javaPath);
+ if(recipe.type==='pack' && ['resourcepack','shader'].includes(recipe.kind)) return job=>{const apiKey=recipe.source==='curseforge'?state.contentKey:'';if(recipe.source==='curseforge'&&!apiKey.trim())throw new Error('请先在内容页面重新输入 CurseForge API Key');return invoke('install_pack',{gameDir:recipe.gameDir,version:recipe.version,source:recipe.source,kind:recipe.kind,projectId:recipe.projectId,packVersionId:recipe.packVersionId,apiKey,jobId:job.id});};
  if(recipe.type==='mod' || recipe.type==='modpack') return job=>{const apiKey=recipe.source==='curseforge'?state.contentKey:'';if(recipe.source==='curseforge'&&!apiKey.trim()) throw new Error('请先在模组页面重新输入 CurseForge API Key');const args={gameDir:recipe.gameDir,source:recipe.source,projectId:recipe.projectId,apiKey,jobId:job.id};return recipe.type==='mod'?invoke('install_mod',{...args,version:recipe.version,modVersionId:recipe.modVersionId}):invoke('install_modpack',{...args,javaPath:recipe.javaPath});};
  return null;
 }
