@@ -7,7 +7,7 @@ const { IDBFactory } = require('fake-indexeddb');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings, rememberAccount} = {}) {
+function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings, rememberAccount, listJava} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w = dom.window;
   const calls = [];
@@ -24,6 +24,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch, app
     if(name==='restore_microsoft_account')return restore ? restore() : null;
     if(name==='logout_microsoft')return logout ? logout() : undefined;
     if(name==='remember_microsoft_account')return rememberAccount ? rememberAccount() : null;
+    if(name==='list_java')return listJava ? listJava() : [];
     if(name==='launch_game')return launch ? launch(args) : undefined;
     if(name==='get_appearance')return appearance ? appearance() : {skin:null,model:'classic',capes:[]};
     if(name==='preview_texture')return selectedSkin;
@@ -232,8 +233,9 @@ test('instance launch settings are isolated per version and can return to global
  const other={id:'1.21.1',name:'1.21.1',kind:'正式版',installed:true};
  const app=boot({preference:'offline',versions:[installed,other]});
  try {
-  await tick();app.click('[data-page="settings"]');
+  await tick();app.click('[data-page="settings"]');assert.equal(app.w.document.querySelector('#instance-settings-form'),null);app.click('[data-page="versions"]');app.click('[data-instance-settings="1.20.1"]');
   const form=app.w.document.querySelector('#instance-settings-form');
+  for(const key of ['overrideJava','overrideMemory','overrideArgs']){form.elements[key].checked=true;form.elements[key].dispatchEvent(new app.w.Event('change',{bubbles:true}));}
   form.elements.javaPath.value='/java/one';form.elements.memoryMode.value='manual';form.elements.memoryMode.dispatchEvent(new app.w.Event('change',{bubbles:true}));
   const slider=form.querySelector('#instance-memory-range'),memory=form.elements.memory;assert.equal(form.querySelector('#instance-memory-manual').hidden,false);assert.equal(slider.disabled,false);
   slider.value='6144';slider.dispatchEvent(new app.w.Event('input',{bubbles:true}));assert.equal(memory.value,'6144');
@@ -248,8 +250,56 @@ test('instance launch settings are isolated per version and can return to global
   app.click('[data-action="close-launch-view"]');app.click('[data-page="versions"]');app.click('[data-select="1.21.1"]');app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
   const second=app.calls.findLast(c=>c.name==='launch_game').args.options;
   assert.equal(second.javaPath,'java');assert.notEqual(second.memory,6144);
-  app.click('[data-action="close-launch-view"]');app.click('[data-page="versions"]');app.click('[data-select="1.20.1"]');app.click('[data-page="settings"]');app.click('[data-action="reset-instance-settings"]');
+  app.click('[data-action="close-launch-view"]');app.click('[data-page="versions"]');app.click('[data-instance-settings="1.20.1"]');app.click('[data-action="reset-instance-settings"]');
   assert.equal(JSON.parse(app.w.localStorage.getItem('ccl-instance-launch-settings'))[JSON.stringify(['/game','1.20.1'])],undefined);
+ } finally {app.close();}
+});
+
+test('Java and memory overrides inherit global settings independently for each version', async () => {
+ const other={id:'1.21.1',name:'1.21.1',kind:'正式版',installed:true};
+ const app=boot({preference:'offline',versions:[installed,other],savedSettings:{javaPath:'/java/global',memory:4096,memoryMode:'manual',jvmArgs:'-Dglobal=true'}});
+ try {
+  await tick();app.click('[data-page="versions"]');
+  // Configure a version without selecting it as the current game.
+  app.click('[data-instance-settings="1.21.1"]');let form=app.w.document.querySelector('#instance-settings-form');
+  form.elements.overrideJava.checked=true;form.elements.overrideJava.dispatchEvent(new app.w.Event('change',{bubbles:true}));form.elements.javaPath.value='/java/other';
+  assert.ok(form.querySelector('#instance-memory-fields').disabled);
+  form.dispatchEvent(new app.w.Event('submit',{bubbles:true,cancelable:true}));
+  app.click('[data-instance-settings="1.20.1"]');form=app.w.document.querySelector('#instance-settings-form');
+  form.elements.overrideMemory.checked=true;form.elements.overrideMemory.dispatchEvent(new app.w.Event('change',{bubbles:true}));
+  form.elements.memoryMode.value='manual';form.elements.memoryMode.dispatchEvent(new app.w.Event('change',{bubbles:true}));form.elements.memory.value='6144';
+  form.dispatchEvent(new app.w.Event('submit',{bubbles:true,cancelable:true}));
+  app.click('[data-page="settings"]');const global=app.w.document.querySelector('#settings-form');global.elements.javaPath.value='/java/changed';global.elements.memory.value='8192';global.elements.jvmArgs.value='-Dchanged=true';global.dispatchEvent(new app.w.Event('submit',{bubbles:true,cancelable:true}));await tick();
+  app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+  let options=app.calls.findLast(c=>c.name==='launch_game').args.options;
+  assert.equal(options.version,'1.20.1');assert.equal(options.javaPath,'/java/changed');assert.equal(options.memory,6144);assert.equal(options.jvmArgs,'-Dchanged=true');
+  app.click('[data-action="close-launch-view"]');app.click('[data-page="versions"]');app.click('[data-select="1.21.1"]');app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+  options=app.calls.findLast(c=>c.name==='launch_game').args.options;
+  assert.equal(options.javaPath,'/java/other');assert.equal(options.memory,8192);assert.equal(options.jvmArgs,'-Dchanged=true');
+ } finally {app.close();}
+});
+
+test('legacy instance settings keep all independent values after upgrading', async () => {
+ const key=JSON.stringify(['/game','1.20.1']);
+ const app=boot({preference:'offline',instanceSettings:{[key]:{javaPath:'/java/legacy',memory:7000,memoryMode:'manual',optimize:false,jvmArgs:'-Dlegacy=true',gameArgs:'--width 1200'}}});
+ try {
+  await tick();app.click('[data-page="versions"]');app.click('[data-instance-settings="1.20.1"]');
+  const form=app.w.document.querySelector('#instance-settings-form');assert.ok(form.elements.overrideJava.checked && form.elements.overrideMemory.checked && form.elements.overrideArgs.checked);
+  app.click('[data-action="close-instance-settings"]');app.click('[data-page="home"]');app.click('[data-action="launch"]');await tick();
+  const options=app.calls.findLast(c=>c.name==='launch_game').args.options;
+  assert.equal(options.javaPath,'/java/legacy');assert.equal(options.memory,7000);assert.equal(options.jvmArgs,'-Dlegacy=true');assert.equal(options.optimize,false);
+ } finally {app.close();}
+});
+
+test('detected Java environments arrive without replacing unsaved instance edits', async () => {
+ let finishJava;
+ const app=boot({preference:'offline',listJava:()=>new Promise(resolve=>{finishJava=resolve;})});
+ try {
+  await tick();app.click('[data-page="versions"]');app.click('[data-instance-settings="1.20.1"]');
+  const form=app.w.document.querySelector('#instance-settings-form');form.elements.overrideJava.checked=true;form.elements.overrideJava.dispatchEvent(new app.w.Event('change',{bubbles:true}));form.elements.javaPath.value='/custom/java';
+  finishJava([{path:'/java/21',major:21}]);await tick();
+  assert.equal(app.w.document.querySelector('#instance-java').value,'/custom/java');
+  assert.ok(app.w.document.querySelector('#instance-java-list option[value="/java/21"]'));
  } finally {app.close();}
 });
 

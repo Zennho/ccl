@@ -94,3 +94,18 @@
 .memory-info{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:14px;padding:11px 12px;border:1px solid #dce6d5;border-radius:9px;background:#f4f8f0;color:#687b60;font-size:11px;line-height:1.7}
 .memory-info .text-link{margin:0;white-space:nowrap}
 .isolation-field .option-check input{width:auto;padding:0;accent-color:#75946a}
+
+/* Per-instance options live with the selected version's actions. */
+.instance-settings-dialog{width:min(650px,100%)}
+.instance-setting-group{padding:16px 0;border-bottom:1px solid #e3e9de}
+.instance-override{display:flex;align-items:flex-start;gap:11px;cursor:pointer;color:#445841}
+.instance-override input{width:16px;height:16px;margin:2px 0 0;accent-color:#729168;flex:none}
+.instance-override strong,.instance-override small{display:block}
+.instance-override strong{font-size:13px}
+.instance-override small{margin-top:4px;font-size:11px;font-weight:400;color:#7c8d78}
+.instance-setting-group fieldset{border:0;padding:0 0 0 27px;margin:0;min-width:0}
+.instance-setting-group fieldset:disabled{opacity:.52}
+.instance-setting-group .field{margin-top:15px}
+.instance-setting-group .option-check input{width:auto;padding:0;accent-color:#729168}
+.instance-setting-hint{margin:10px 0 0;color:#7c8d78;font-size:10px;line-height:1.6}
+.instance-settings-dialog .install-actions{border:0;margin-top:4px}
