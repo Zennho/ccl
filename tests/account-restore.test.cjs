@@ -7,12 +7,12 @@ const { IDBFactory } = require('fake-indexeddb');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount} = {}) {
+function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w = dom.window;
   const calls = [];
   if(database) w.indexedDB=database;
-  w.localStorage.setItem('ccl-settings', JSON.stringify({accountMode:preference,accountKnown:known,selected:installed.id,gameDir:'/game'}));
+  w.localStorage.setItem('ccl-settings', JSON.stringify({accountMode:preference,accountKnown:known,selected:installed.id,gameDir:'/game',...savedSettings}));
   if(instanceSettings)w.localStorage.setItem('ccl-instance-launch-settings',JSON.stringify(instanceSettings));
   w.setInterval=()=>0; w.__icons = {}; w.createIcons = () => {}; w.isTauri = () => true;
   w.getCurrentWindow = () => ({}); w.listen = async () => () => {};
@@ -265,4 +265,64 @@ test('account switch failures preserve the previous session or expose a retry', 
  const accounts=[{uuid:'one',name:'First'},{uuid:'two',name:'Second'}];let fail=true;
  const app=boot({known:true,savedAccounts:accounts,restore:()=>({uuid:'one',name:'First'}),switchAccount:()=>{if(fail){fail=false;throw new Error('凭据库已锁定');}return {account:null,error:'网络不可用'};},appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
  try {await tick();await tick();app.click('[data-page="account"]');await tick();app.click('[data-switch-account="two"]');await tick();assert.equal(app.w.document.querySelector('.profile strong').textContent,'First');app.click('[data-switch-account="two"]');await tick();assert.equal(app.w.document.querySelector('.profile strong').textContent,'Second');assert.match(app.w.document.querySelector('.identity-card').textContent,/网络不可用/);assert.ok(app.w.document.querySelector('[data-action="retry-account-restore"]'));} finally {app.close();}
+});
+
+
+test('cached online avatar appears before restoration and updates after a skin change', async () => {
+ const database=new IDBFactory();
+ const first=boot({known:true,database,restore:()=>({name:'RealPlayer',uuid:'account-one'}),appearance:()=>({skin:'data:image/png;base64,old',model:'classic',capes:[]})});
+ try {await tick();await tick();assert.equal(first.w.document.querySelector('.avatar-face').src,'data:image/png;base64,old');assert.equal(JSON.parse(first.w.localStorage.getItem('ccl-settings')).accountUuid,'account-one');await tick();} finally {first.close();}
+ let completeRestore,completeAppearance;
+ const second=boot({known:true,database,savedSettings:{accountUuid:'account-one',accountName:'RealPlayer'},restore:()=>new Promise(resolve=>{completeRestore=resolve;}),appearance:()=>new Promise(resolve=>{completeAppearance=resolve;})});
+ try {
+  await tick();await tick();assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,old');
+  assert.equal(second.calls.filter(c=>c.name==='get_appearance').length,0);
+  completeRestore({name:'RealPlayer',uuid:'account-one'});await tick();
+  assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,old');
+  completeAppearance({skin:'data:image/png;base64,new',model:'classic',capes:[]});await tick();await tick();
+  assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,new');
+ } finally {second.close();}
+ let resolveRestore;
+ const third=boot({known:true,database,savedSettings:{accountUuid:'account-one',accountName:'RealPlayer'},restore:()=>new Promise(resolve=>{resolveRestore=resolve;})});
+ try {await tick();await tick();assert.equal(third.w.document.querySelector('.avatar-face').src,'data:image/png;base64,new');} finally {third.close();}
+});
+
+test('cached avatars are separated by account and are hidden for offline mode', async () => {
+ const database=new IDBFactory();const accounts=[{uuid:'one',name:'First'},{uuid:'two',name:'Second'}];
+ const first=boot({known:true,database,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
+ try {await tick();await tick();}finally{first.close();}
+ const second=boot({known:true,database,restore:()=>({uuid:'two',name:'Second'}),appearance:()=>({skin:'data:image/png;base64,two',model:'classic',capes:[]})});
+ try {await tick();await tick();}finally{second.close();}
+ let completeSwitch;
+ const app=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},savedAccounts:accounts,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]}),switchAccount:()=>new Promise(resolve=>{completeSwitch=resolve;})});
+ try {
+  await tick();await tick();app.click('[data-page="account"]');await tick();app.click('[data-switch-account="two"]');await tick();
+  assert.equal(app.w.document.querySelector('.avatar-face').src,'data:image/png;base64,two','selected account uses its own cached avatar');
+  app.click('[data-action="use-offline"]');assert.equal(app.w.document.querySelector('.avatar-face'),null,'offline mode does not show an online skin');
+  completeSwitch({account:{uuid:'two',name:'Second'},error:null});await tick();
+  assert.equal(app.w.document.querySelector('.avatar-face'),null,'late authentication does not replace offline avatar');
+ } finally {app.close();}
+});
+
+test('logout removes the selected cached avatar', async () => {
+ const database=new IDBFactory();
+ const first=boot({known:true,database,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
+ try {await tick();await tick();first.click('[data-page="account"]');await tick();first.click('[data-action="logout-microsoft"]');await tick();await tick();}finally{first.close();}
+ const second=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>new Promise(()=>{})});
+ try {await tick();await tick();assert.equal(second.w.document.querySelector('.avatar-face'),null);}finally{second.close();}
+});
+
+
+test('failed skin refresh keeps the cached avatar until a successful empty response', async () => {
+ const database=new IDBFactory();const first=boot({known:true,database,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
+ try {await tick();await tick();}finally{first.close();}
+ let attempt=0;
+ const app=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>({uuid:'one',name:'First'}),appearance:()=>++attempt===1?Promise.reject('网络错误'):{skin:null,model:'classic',capes:[]}});
+ try {
+  await tick();await tick();assert.equal(app.w.document.querySelector('.avatar-face').src,'data:image/png;base64,one');
+  app.click('[data-page="account"]');await tick();await tick();
+  assert.equal(app.w.document.querySelector('.avatar-face'),null,'a successful no-skin response invalidates the old cache');
+ }finally{app.close();}
+ const again=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>new Promise(()=>{})});
+ try {await tick();await tick();assert.equal(again.w.document.querySelector('.avatar-face'),null);}finally{again.close();}
 });
