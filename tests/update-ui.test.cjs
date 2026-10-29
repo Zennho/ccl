@@ -5,10 +5,10 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot(check) {
+function boot(check, settings={}) {
   const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w=dom.window,calls=[],intervals=[];
-  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:installed.id,gameDir:'/game'}));
+  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:installed.id,gameDir:'/game',...settings}));
   w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};
   w.openDialog=async()=>null;w.saveDialog=async()=>null;
   w.setInterval=(fn,ms)=>{intervals.push({fn,ms});return intervals.length;};
@@ -20,6 +20,18 @@ function boot(check) {
   const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};
   return {w,calls,intervals,click,close:()=>w.close()};
 }
+
+test('restores banner appearance after restarting',async()=>{
+  const app=boot(()=>Promise.resolve({available:false}),{theme:{bannerOpacity:35,bannerFrost:60,bannerBlur:12}});
+  try {
+    await tick();app.click('[data-page="settings"]');
+    assert.equal(app.w.document.querySelector('#theme-bannerFrost').value,'60');
+    assert.equal(app.w.document.querySelector('#theme-bannerBlur').value,'12');
+    assert.equal(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-opacity'),'0.65');
+    assert.equal(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-frost'),'0.6');
+    assert.equal(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-blur'),'12px');
+  } finally {app.close();}
+});
 
 test('checks automatically, shows the update and opens the fixed release command',async()=>{
   const app=boot(()=>Promise.resolve({currentVersion:'0.1.11',latestVersion:'0.1.12',available:true}));
