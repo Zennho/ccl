@@ -83,7 +83,7 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 
 ## 从源码开发
 
-此分支正在迁移到 React：应用外壳、主页与版本列表已接入 React，其余页面与弹窗暂由兼容层渲染，交互状态和部分 DOM 更新仍沿用原实现。迁移尚未完成，合并前仍需逐页替换兼容层并验证桌面端行为。
+此分支正在迁移到 React 和 TypeScript：主页、版本列表、Java 管理、IPv6 房间和实例设置已改为 TSX，实例启动配置的读取与继承逻辑也已类型化。其余页面与弹窗暂由兼容层渲染，交互状态和部分 DOM 更新仍沿用原实现。TypeScript 严格检查目前覆盖 `src/react`；迁移尚未完成，合并前仍需逐页替换兼容层并验证桌面端行为。
 
 ### 环境准备
 
@@ -99,7 +99,8 @@ npm run tauri dev
 常用命令：
 
 ```bash
-npm run check                              # 版本一致性、前端测试和构建
+npm run check                              # 版本一致性、TypeScript 检查、前端测试和构建
+npm run typecheck                          # 检查已迁移的 TypeScript 代码
 npm test                                   # 下载队列及界面交互测试
 cargo fmt --manifest-path src-tauri/Cargo.toml --check    # Rust 格式检查
 cargo test --manifest-path src-tauri/Cargo.toml --locked  # Rust 后端测试

@@ -6,8 +6,11 @@ import './launch-screen.css';
 import './management.css';
 import './update.css';
 import { createJobManager } from './job-manager.js';
-import { createRenderer } from './react/renderer.js';
-import { HomePage, VersionsPage } from './react/pages.js';
+import { createRenderer } from './react/renderer.tsx';
+import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
+import { InstanceSettingsDialog } from './react/instance-settings.tsx';
+import { LanRoomPage } from './react/lan-room.tsx';
+import { normalizeInstanceSettings, resolveInstanceSettings } from './react/instance-settings-model.ts';
 import { version as appVersion } from '../package.json';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { createIcons, Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks } from 'lucide';
@@ -38,26 +41,10 @@ try { const value=JSON.parse(localStorage.getItem('ccl-offline-skin-instances')|
 let instanceLaunchSettings={};
 try { const value=JSON.parse(localStorage.getItem('ccl-instance-launch-settings')||'{}');if(value && typeof value==='object' && !Array.isArray(value))instanceLaunchSettings=value; } catch {}
 function getLaunchSettings(gameDir,version) {
- const value=instanceLaunchSettings[instanceKey(gameDir,version)];
- if(!value || typeof value!=='object')return null;
- // Records written by older versions contained a complete independent snapshot.
- const overrideJava=value.overrideJava!==false,overrideMemory=value.overrideMemory!==false,overrideArgs=value.overrideArgs!==false;
- if((overrideJava && (typeof value.javaPath!=='string' || !value.javaPath.trim())) || (overrideMemory && (!['auto','manual'].includes(value.memoryMode) || !Number.isInteger(value.memory) || value.memory<512 || value.memory>32768)) || (overrideArgs && (typeof value.optimize!=='boolean' || typeof value.jvmArgs!=='string' || value.jvmArgs.length>16384 || typeof value.gameArgs!=='string' || value.gameArgs.length>16384)))return null;
- return {...value,overrideJava,overrideMemory,overrideArgs};
+ return normalizeInstanceSettings(instanceLaunchSettings[instanceKey(gameDir,version)]);
 }
 function effectiveLaunchSettings(gameDir,version) {
- const savedSettings=getLaunchSettings(gameDir,version);
- return {javaPath:savedSettings?.overrideJava?savedSettings.javaPath:state.javaPath,memory:savedSettings?.overrideMemory?savedSettings.memory:state.memory,memoryMode:savedSettings?.overrideMemory?savedSettings.memoryMode:state.memoryMode,optimize:savedSettings?.overrideArgs?savedSettings.optimize:state.optimize,jvmArgs:savedSettings?.overrideArgs?savedSettings.jvmArgs:state.jvmArgs,gameArgs:savedSettings?.overrideArgs?savedSettings.gameArgs:state.gameArgs};
-}
-function instanceSettingsDialog() {
- const d=state.instanceSettingsView;if(!d)return '';
- const savedSettings=getLaunchSettings(d.gameDir,d.version),value={...state,...savedSettings};
- const javaOn=!!savedSettings?.overrideJava,memoryOn=!!savedSettings?.overrideMemory,argsOn=!!savedSettings?.overrideArgs;
- return `<div class="install-overlay"><section class="install-dialog instance-settings-dialog" role="dialog" aria-modal="true" aria-labelledby="instance-settings-title"><div class="install-dialog-head"><div><span class="section-index">INSTANCE / LAUNCH</span><h2 id="instance-settings-title">实例设置 <em>${esc(d.name)}</em></h2><p>单独调整此实例的启动方式；未开启的项目跟随全局设置。</p></div><button class="icon-button" type="button" data-action="close-instance-settings" aria-label="关闭">${icon('x',19)}</button></div>
- <form id="instance-settings-form"><div class="instance-setting-group"><label class="instance-override"><input type="checkbox" name="overrideJava" ${javaOn?'checked':''}><span><strong>指定 Java 环境</strong><small>关闭时使用全局 Java 路径</small></span></label><fieldset id="instance-java-fields" ${javaOn?'':'disabled'}><div class="field"><label for="instance-java">Java 可执行文件</label><input id="instance-java" name="javaPath" list="instance-java-list" value="${esc(value.javaPath)}" required><datalist id="instance-java-list">${instanceJavaOptions()}</datalist><p>选择已检测的环境，或输入 Java 路径。</p></div></fieldset></div>
- <div class="instance-setting-group"><label class="instance-override"><input type="checkbox" name="overrideMemory" ${memoryOn?'checked':''}><span><strong>指定内存配置</strong><small>关闭时使用全局内存配置</small></span></label><fieldset id="instance-memory-fields" ${memoryOn?'':'disabled'}><div class="field memory-field"><label for="instance-memory-mode">内存分配</label><select id="instance-memory-mode" name="memoryMode"><option value="auto" ${value.memoryMode==='auto'?'selected':''}>自动分配</option><option value="manual" ${value.memoryMode==='manual'?'selected':''}>手动设置</option></select></div><div id="instance-memory-manual" class="field memory-field" ${value.memoryMode==='manual'?'':'hidden'}><div class="memory-value"><label for="instance-memory">手动内存上限</label><div><input id="instance-memory" name="memory" type="number" min="512" max="32768" step="1" value="${esc(value.memory)}" required><span>MB</span></div></div><input id="instance-memory-range" aria-label="调整实例最大内存" type="range" min="512" max="32768" step="256" value="${esc(value.memory)}"><div class="range-labels"><span>512 MB</span><span>32 GB</span></div></div><p class="instance-setting-hint">自动分配会根据设备内存动态计算；自定义 JVM 参数中的 -Xmx 会覆盖此设置。</p></fieldset></div>
- <div class="instance-setting-group"><label class="instance-override"><input type="checkbox" name="overrideArgs" ${argsOn?'checked':''}><span><strong>指定启动参数</strong><small>关闭时使用全局优化和启动参数</small></span></label><fieldset id="instance-args-fields" ${argsOn?'':'disabled'}><div class="field"><label class="option-check"><input name="optimize" type="checkbox" ${value.optimize?'checked':''}> 启用 G1 垃圾回收优化</label></div><div class="field"><label for="instance-jvm">JVM 参数</label><input id="instance-jvm" name="jvmArgs" maxlength="16384" value="${esc(value.jvmArgs)}"></div><div class="field"><label for="instance-game">游戏参数</label><input id="instance-game" name="gameArgs" maxlength="16384" value="${esc(value.gameArgs)}"></div></fieldset></div>
- <div class="install-actions">${savedSettings?'<button class="outline-btn" type="button" data-action="reset-instance-settings">全部使用全局设置</button>':''}<button class="save-button" type="submit">保存实例设置</button></div></form></section></div>`;
+ return resolveInstanceSettings(state,getLaunchSettings(gameDir,version));
 }
 function instanceJavaOptions(){return (Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]).filter(j=>typeof j.path==='string' && j.path).map(j=>`<option value="${esc(j.path)}">Java ${esc(j.major || j.version || '')}</option>`).join('');}
 
@@ -301,17 +288,7 @@ function shell() {
   <div class="content"></div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
 }
 function multiplayerPage() {
- return `<div class="server-tabs" role="tablist" aria-label="联机功能"><button type="button" data-lan-view="room" role="tab" aria-selected="${state.lanView==='room'}">IPv6 房间</button><button type="button" data-lan-view="servers" role="tab" aria-selected="${state.lanView==='servers'}">公开服务器</button></div>${state.lanView==='room' ? lanRoomPage() : publicServersPage()}`;
-}
-function lanRoomPage() {
- const room=state.lanRoom;
- return `<div class="page-heading inner-heading"><div><h1>多人联机</h1><p>通过 IPv6 邀请朋友加入你的 Java 版世界。</p></div><button class="outline-btn" data-action="refresh-ipv6" ${state.lanBusy?'disabled':''}>${icon('refresh-cw',16)} 刷新地址</button></div>
- <div class="lan-layout"><section class="lan-card lan-host"><div class="lan-card-head"><div><span class="lan-number">01 / HOST</span><h2>创建联机房间</h2><p>先在游戏内进入世界，选择“对局域网开放”，记下游戏显示的端口。</p></div><span class="lan-status ${room?'is-open':''}"><i></i>${room?'房间开放中':'未开放'}</span></div>
- <form id="lan-host-form"><label for="lan-game-port">游戏局域网端口</label><div class="lan-input-row"><input id="lan-game-port" name="lanGamePort" type="number" min="1" max="65535" required placeholder="例如 51234" value="${esc(state.lanPort)}" ${room||state.lanBusy?'disabled':''}>${room?`<button type="button" class="outline-btn" data-action="stop-ipv6-room" ${state.lanBusy?'disabled':''}>关闭房间</button>`:`<button type="submit" class="save-button" ${state.lanBusy?'disabled':''}>${state.lanBusy?'正在开启…':'开启房间'} ${icon('chevron-right',16)}</button>`}</div></form>
- ${room?`<div class="lan-addresses"><div class="lan-address-title"><strong>分享给朋友</strong><span>中转端口 ${room.port}</span></div>${state.lanAddresses.length?state.lanAddresses.map((a,i)=>`<div class="lan-address"><div><code>[${esc(a.address)}]:${room.port}</code><small>${esc(a.scope)} · ${esc(a.interface)}</small></div><button class="row-button" data-copy-ipv6="${i}">复制</button></div>`).join(''):'<p>未检测到可用的公网或内网 IPv6 地址，请检查网络连接后刷新。</p>'}</div>`:'<div class="lan-hint">创建后，将生成朋友可在游戏中使用的 IPv6 地址。</div>'}
- <p class="lan-footnote">仅分享给可信任的朋友。房间开放时，CCL 会监听网络并转发到本机游戏；关闭 CCL 或房间会断开连接。</p></section>
- <section class="lan-card lan-join"><div class="lan-card-head"><div><span class="lan-number">02 / JOIN</span><h2>加入朋友的世界</h2><p>粘贴房主分享的地址，检查连接后在游戏中加入。</p></div></div><form id="lan-test-form"><label for="lan-target">房间地址</label><div class="lan-input-row"><input id="lan-target" name="lanTarget" value="${esc(state.lanTarget)}" placeholder="[IPv6地址]:端口" required><button class="outline-btn" type="submit" ${state.lanBusy?'disabled':''}>${state.lanBusy?'检测中…':'检测连接'}</button></div></form>${state.lanTest?`<p class="lan-test-result">${esc(state.lanTest)}</p>`:''}<div class="lan-steps"><span>1</span><p>启动相同游戏版本及兼容的模组。</p><span>2</span><p>在游戏中打开“多人游戏 → 直接连接”，粘贴房间地址。</p></div></section></div>
- <p class="lan-network-note">跨网络联机需要双方有可互通的 IPv6，房主的路由器和防火墙需允许入站 TCP。公网候选地址不保证外网可达；内网地址通常只适用于同一网络。</p>`;
+ return `<div class="server-tabs" role="tablist" aria-label="联机功能"><button type="button" data-lan-view="room" role="tab" aria-selected="${state.lanView==='room'}">IPv6 房间</button><button type="button" data-lan-view="servers" role="tab" aria-selected="${state.lanView==='servers'}">公开服务器</button></div>${publicServersPage()}`;
 }
 async function refreshLanAddresses() {
  try { state.lanAddresses=await invoke('ipv6_addresses'); if(state.page==='multiplayer') render(); }
@@ -671,17 +648,6 @@ const { downloadsPage, saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, 
   }
  }
 });
-function javaPage() {
- const runtimes = state.javaRuntimes;
- const options = [8, 17, 21, 25];
- const mb = n => (n / 1048576).toFixed(1) + ' MB';
- return `<div class="page-heading inner-heading"><div><h1>Java 管理</h1><p>下载或选择适合游戏版本的 Java。</p></div><button class="outline-btn" data-action="refresh-java" ${state.javaLoading ? 'disabled' : ''}>${icon('refresh-cw',16)} ${state.javaLoading ? '正在检测' : '检测本机 Java'}</button></div>
- <div class="section-title"><div><span class="section-index">01 / DOWNLOAD</span><h3>下载 Java</h3></div><span class="section-note">Eclipse Temurin · JRE · 当前系统和架构</span></div>
- <div class="java-download-grid">${options.map(major => { const installed = runtimes.some(j => j.managed && j.major === major); const desc = {8:'适用于多数旧版本',17:'适用于部分较新版本',21:'适用于较新版本',25:'适用于需要 Java 25 的版本'}[major]; return `<div class="java-download-card"><div class="java-card-top"><span>JAVA</span>${icon('download',16)}</div><strong>${major}</strong><p>${desc}</p><button data-java-install="${major}" ${hasJob(`java:${major}`) || installed || state.javaLoading ? 'disabled' : ''}>${installed ? '已安装' : hasJob(`java:${major}`) ? '任务中' : '下载安装'}</button></div>`; }).join('')}</div>
- <div class="section-title"><div><span class="section-index">02 / INSTALLED</span><h3>可用的 Java <span class="count">${runtimes.length}</span></h3></div><span class="section-note">当前启动路径：${esc(state.javaPath)}</span></div>
- <div class="version-list">${runtimes.length ? runtimes.map((j,i) => `<div class="version-row java-row"><div class="row-icon">${icon('monitor',19)}</div><div class="row-name"><strong>Java ${esc(j.major || '')} <span class="java-version">${esc(j.version)}</span></strong><span class="java-path" title="${esc(j.path)}">${esc(j.path)}</span></div><div class="row-state installed"><span></span>${j.managed ? 'CCL 管理' : '本机环境'}</div><button class="row-button ${state.javaPath === j.path ? 'selected' : ''}" data-java-select="${i}">${state.javaPath === j.path ? '当前使用' : '选择使用'}</button>${j.managed ? `<button class="row-button danger-button" data-java-remove="${i}" ${hasJob(`java:${j.major}`) ? 'disabled' : ''}>删除</button>` : ''}</div>`).join('') : `<div class="empty-state">${icon('monitor',27)}<strong>${state.javaLoading ? '正在检测 Java…' : '尚未检测到 Java 环境'}</strong><p>下载一个版本，或在启动设置中手动填写路径。</p></div>`}</div>
- ${state.javaDelete !== null && runtimes[state.javaDelete] ? `<div class="confirm-overlay"><div class="confirm-box"><span class="section-index">REMOVE RUNTIME</span><h3>删除 Java ${esc(runtimes[state.javaDelete].major)}？</h3><p>将删除由 CCL 下载的此 Java 环境。游戏文件和本机其他 Java 不受影响。</p><div><button class="row-button" data-action="cancel-java-remove">取消</button><button class="row-button danger-button" data-action="confirm-java-remove">确认删除</button></div></div></div>` : ''}`;
-}
 async function refreshJava() {
  state.javaLoading = true; if (state.page === 'java') render();
  try { state.javaRuntimes = await invoke('list_java'); }
@@ -712,7 +678,10 @@ function renderOverlay() {
   current.querySelector('.launch-screen-copy').innerHTML=next.querySelector('.launch-screen-copy').innerHTML;
  } else if(state.instanceSettingsView && root.querySelector('.instance-settings-dialog') && !state.launchView && !state.crashDialog) {
   // Keep unsaved edits intact when background activity refreshes the overlay.
- } else renderer.overlay(state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.instanceSettingsView ? instanceSettingsDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.instanceView ? instanceDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '');
+ } else if(state.instanceSettingsView && !state.launchView && !state.crashDialog) {
+  const d=state.instanceSettingsView,savedSettings=getLaunchSettings(d.gameDir,d.version);
+  renderer.overlay('',InstanceSettingsDialog,{name:d.name,values:{...state,...savedSettings},saved:savedSettings,runtimes:Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]});
+ } else renderer.overlay(state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.instanceView ? instanceDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '');
  syncMemoryControls();
  if(state.profileView)paintProfileImages(state.profileView);
  hydrateIcons();
@@ -720,7 +689,9 @@ function renderOverlay() {
 function renderPage() {
  if(state.page==='home'){const v=selected();renderer.page('',HomePage,{version:v,versionIcon:versionIcon(v,'version-cube'),description:v?.installed?getInstanceTheme(state.gameDir,v.id).description:''});return;}
  if(state.page==='versions' && !state.versionDelete){renderer.page('',VersionsPage,{versions:state.versions,query:state.versionQuery,selected:state.selected,loading:state.loading,versionIcon});return;}
- renderer.page(state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage());
+ if(state.page==='java'){renderer.page('',JavaPage,{runtimes:state.javaRuntimes,javaPath:state.javaPath,loading:state.javaLoading,deleteIndex:state.javaDelete,hasJob});return;}
+ if(state.page==='multiplayer' && state.lanView==='room'){renderer.page('',LanRoomPage,{room:state.lanRoom,busy:state.lanBusy,addresses:state.lanAddresses,port:state.lanPort,target:state.lanTarget,test:state.lanTest});return;}
+ renderer.page(state.page === 'versions' ? versionsPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage());
 }
 function render() {
  if(composingSearch && renderedPage===state.page) { pendingCompositionRender=true;return; }
