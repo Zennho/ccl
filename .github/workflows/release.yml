@@ -50,8 +50,9 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libdbus-1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
       - run: npm ci
+      - run: npm run check:version
       - run: npm test
       - name: Test backend
         if: runner.os == 'Linux'
@@ -80,6 +81,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - uses: actions/download-artifact@v4
         with:
           path: release-assets
@@ -92,4 +96,6 @@ jobs:
           set -euo pipefail
           mapfile -d '' assets < <(find release-assets -type f \( -name '*.exe' -o -name '*.deb' -o -name '*.AppImage' -o -name '*.dmg' \) -print0)
           test "${#assets[@]}" -ge 5
-          gh release create v0.1.10 "${assets[@]}" --target "$GITHUB_SHA" --title 'CCL 0.1.10' --notes-file .github/release-notes.md
+          node scripts/check-versions.mjs
+          version=$(node -p "require('./package.json').version")
+          gh release create "v${version}" "${assets[@]}" --target "$GITHUB_SHA" --title "CCL ${version}" --notes-file .github/release-notes.md

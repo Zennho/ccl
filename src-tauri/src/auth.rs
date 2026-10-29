@@ -1,4 +1,4 @@
-use crate::{http_client, ResultT};
+use crate::{credentials, http_client, ResultT};
 use base64::{
     engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD},
     Engine,
@@ -47,6 +47,7 @@ struct Session {
     uuid: String,
     xuid: String,
     generation: u64,
+    remembered: bool,
 }
 #[derive(Default)]
 struct AuthState {
@@ -70,6 +71,7 @@ pub struct BrowserPrompt {
 pub struct AccountInfo {
     name: String,
     uuid: String,
+    remembered: bool,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -97,6 +99,7 @@ fn info(s: &Session) -> AccountInfo {
     AccountInfo {
         name: s.name.clone(),
         uuid: s.uuid.clone(),
+        remembered: s.remembered,
     }
 }
 fn valid_client_id(id: &str) -> bool {
@@ -110,7 +113,9 @@ fn valid_client_id(id: &str) -> bool {
         })
 }
 fn response_json_error(status: reqwest::StatusCode, body: &Value, context: &str) -> String {
-    if status == reqwest::StatusCode::UNAUTHORIZED {
+    if context == "刷新微软登录" && body["error"].as_str() == Some("invalid_grant") {
+        format!("{context}：授权已过期或撤销，请重新登录")
+    } else if status == reqwest::StatusCode::UNAUTHORIZED {
         format!("{context}：授权失效，请重新登录")
     } else if status == reqwest::StatusCode::FORBIDDEN {
         if context == "Minecraft 登录" {
@@ -487,6 +492,26 @@ async fn redeem_authorization_code(
         .await
         .map_err(|e| format!("{e}；请检查应用客户端 ID 和 localhost 重定向 URI"))
 }
+async fn redeem_refresh_token(
+    client: &reqwest::Client,
+    token_url: &str,
+    client_id: &str,
+    refresh_token: &str,
+) -> ResultT<Value> {
+    let response = client
+        .post(token_url)
+        .form(&[
+            ("client_id", client_id),
+            ("grant_type", "refresh_token"),
+            ("refresh_token", refresh_token),
+            ("scope", SCOPE),
+        ])
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(request_error("刷新微软登录"))?;
+    json_response(response, "刷新微软登录").await
+}
 #[tauri::command]
 pub async fn complete_microsoft_login() -> ResultT<AccountInfo> {
     let pending = state()
@@ -528,10 +553,22 @@ pub async fn complete_microsoft_login() -> ResultT<AccountInfo> {
         uuid,
         xuid,
         generation: pending.generation,
+        remembered: false,
     };
     let mut s = state().lock().await;
     if s.generation != pending.generation {
         return Err("登录已取消".into());
+    }
+    let mut session = session;
+    if let Some(refresh_token) = session.refresh_token.as_ref() {
+        session.remembered = credentials::save(credentials::StoredAccount {
+            client_id: session.client_id.clone(),
+            refresh_token: refresh_token.clone(),
+            name: session.name.clone(),
+            uuid: session.uuid.clone(),
+        })
+        .await
+        .is_ok();
     }
     let result = info(&session);
     s.pending = None;
@@ -557,15 +594,69 @@ pub async fn cancel_microsoft_login() {
     s.pending = None;
 }
 #[tauri::command]
-pub async fn logout_microsoft() {
+pub async fn logout_microsoft() -> ResultT<()> {
     let mut s = state().lock().await;
+    let removal = credentials::clear().await;
     s.generation += 1;
     s.pending = None;
     s.session = None;
+    removal.map_err(|error| format!("已退出本次会话，但{error}；保存的账户可能仍可恢复"))
 }
 #[tauri::command]
 pub async fn microsoft_account() -> Option<AccountInfo> {
     state().lock().await.session.as_ref().map(info)
+}
+#[tauri::command]
+pub async fn restore_microsoft_account() -> ResultT<Option<AccountInfo>> {
+    let generation = {
+        let s = state().lock().await;
+        if s.session.is_some() || s.pending.is_some() {
+            return Ok(s.session.as_ref().map(info));
+        }
+        s.generation
+    };
+    let Some(saved) = credentials::load().await? else {
+        return Ok(None);
+    };
+    let configured = configured_client_id(Some(
+        option_env!("CCL_MICROSOFT_CLIENT_ID").unwrap_or(DEFAULT_CLIENT_ID),
+    ))?;
+    if saved.client_id != configured {
+        return Err("保存的账户属于另一微软应用，请重新登录".into());
+    }
+    let generation = {
+        let mut s = state().lock().await;
+        if s.generation != generation || s.session.is_some() || s.pending.is_some() {
+            return Ok(s.session.as_ref().map(info));
+        }
+        s.generation += 1;
+        let generation = s.generation;
+        s.session = Some(Session {
+            client_id: saved.client_id,
+            refresh_token: Some(saved.refresh_token),
+            access_token: String::new(),
+            expires: Instant::now(),
+            name: saved.name,
+            uuid: saved.uuid,
+            xuid: String::new(),
+            generation,
+            remembered: true,
+        });
+        generation
+    };
+    match session().await {
+        Ok(session) => Ok(Some(info(&session))),
+        Err(error) => {
+            let mut s = state().lock().await;
+            if s.session
+                .as_ref()
+                .is_some_and(|session| session.generation == generation)
+            {
+                s.session = None;
+            }
+            Err(error)
+        }
+    }
 }
 async fn session() -> ResultT<Session> {
     let initial = state()
@@ -592,29 +683,40 @@ async fn session() -> ResultT<Session> {
         .as_deref()
         .ok_or("微软登录已过期，请重新登录")?;
     let client = http_client()?;
-    let response = client
-        .post(TOKEN_URL)
-        .form(&[
-            ("client_id", original.client_id.as_str()),
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh),
-            ("scope", SCOPE),
-        ])
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await
-        .map_err(request_error("刷新微软登录"))?;
-    let body = json_response(response, "刷新微软登录").await?;
+    let body = redeem_refresh_token(&client, TOKEN_URL, &original.client_id, refresh).await?;
     let ms = body["access_token"]
         .as_str()
         .ok_or("刷新微软登录失败，请重新登录")?;
+    let rotated = body["refresh_token"]
+        .as_str()
+        .filter(|value| !value.is_empty());
+    let mut remembered = original.remembered;
+    if let Some(token) = rotated {
+        let mut s = state().lock().await;
+        let current = s
+            .session
+            .as_mut()
+            .filter(|current| current.generation == original.generation)
+            .ok_or("账户已退出或切换，请重新登录")?;
+        // Save the rotated Microsoft token before contacting Xbox/Minecraft so a later
+        // service failure cannot discard a newly issued refresh token.
+        remembered = credentials::save(credentials::StoredAccount {
+            client_id: original.client_id.clone(),
+            refresh_token: token.to_string(),
+            name: original.name.clone(),
+            uuid: original.uuid.clone(),
+        })
+        .await
+        .is_ok();
+        current.refresh_token = Some(token.to_string());
+        current.remembered = remembered;
+    }
     let (access, expires, name, uuid, xuid) = exchange(&client, ms).await?;
     if uuid != original.uuid {
         return Err("刷新后的账户与当前账户不匹配，请重新登录".into());
     }
     let new = Session {
-        refresh_token: body["refresh_token"]
-            .as_str()
+        refresh_token: rotated
             .map(str::to_string)
             .or(original.refresh_token.clone()),
         access_token: access,
@@ -622,6 +724,7 @@ async fn session() -> ResultT<Session> {
         name,
         uuid,
         xuid,
+        remembered,
         ..original.clone()
     };
     let mut s = state().lock().await;
@@ -886,6 +989,63 @@ mod tests {
         assert!(response_json_error(status, &account, "Minecraft 登录").contains("账户被"));
         assert!(response_json_error(status, &json!({}), "Minecraft 登录").contains("服务拒绝访问"));
         assert!(!response_json_error(status, &app, "Xbox 登录").contains("应用注册未获"));
+        assert!(response_json_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            &json!({"error":"invalid_grant"}),
+            "刷新微软登录"
+        )
+        .contains("重新登录"));
+    }
+    #[tokio::test]
+    async fn refresh_request_uses_the_saved_token_and_accepts_rotation() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut request = Vec::new();
+            let mut buffer = [0u8; 2048];
+            loop {
+                let count = socket.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                request.extend_from_slice(&buffer[..count]);
+                if let Some(pos) = request.windows(4).position(|v| v == b"\r\n\r\n") {
+                    let head = String::from_utf8_lossy(&request[..pos]);
+                    let length = head
+                        .lines()
+                        .find_map(|line| {
+                            line.to_ascii_lowercase()
+                                .strip_prefix("content-length:")
+                                .and_then(|value| value.trim().parse::<usize>().ok())
+                        })
+                        .unwrap_or(0);
+                    if request.len() >= pos + 4 + length {
+                        break;
+                    }
+                }
+            }
+            let split = request.windows(4).position(|v| v == b"\r\n\r\n").unwrap();
+            let body = std::str::from_utf8(&request[split + 4..]).unwrap();
+            let parsed = reqwest::Url::parse(&format!("http://localhost/?{body}")).unwrap();
+            let fields: std::collections::HashMap<_, _> =
+                parsed.query_pairs().into_owned().collect();
+            assert_eq!(fields["grant_type"], "refresh_token");
+            assert_eq!(fields["client_id"], "client-id");
+            assert_eq!(fields["refresh_token"], "saved+token");
+            let body = r#"{"access_token":"new-access","refresh_token":"rotated-token"}"#;
+            let response = format!("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len());
+            socket.write_all(response.as_bytes()).await.unwrap();
+        });
+        let client = reqwest::Client::builder().no_proxy().build().unwrap();
+        let body = redeem_refresh_token(
+            &client,
+            &format!("http://{address}/token"),
+            "client-id",
+            "saved+token",
+        )
+        .await
+        .unwrap();
+        assert_eq!(body["refresh_token"], "rotated-token");
+        server.await.unwrap();
     }
     #[test]
     fn browser_authorization_uses_pkce_and_validates_callback() {

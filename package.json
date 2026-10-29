@@ -1,13 +1,15 @@
 {
   "name": "ccl-launcher",
   "private": true,
-  "version": "0.1.10",
+  "version": "0.1.11",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "test": "node tests/ui.cjs"
+    "test": "node --test tests/job-manager.test.mjs tests/version-check.test.mjs && node --test tests/account-restore.test.cjs && node tests/ui.cjs",
+    "check:version": "node scripts/check-versions.mjs",
+    "check": "npm run check:version && npm test && npm run build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",

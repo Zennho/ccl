@@ -2,6 +2,7 @@
 mod archive;
 mod auth;
 mod content;
+mod credentials;
 mod java;
 mod jobs;
 mod lan;
@@ -184,7 +185,7 @@ fn http_client() -> ResultT<reqwest::Client> {
 fn http_client_builder() -> ResultT<reqwest::ClientBuilder> {
     let proxy = MANUAL_PROXY.read().map_err(|_| "无法读取代理设置")?.clone();
     let mut builder = reqwest::Client::builder()
-        .user_agent("CCL/0.1.10")
+        .user_agent(format!("CCL/{}", env!("CARGO_PKG_VERSION")))
         .connect_timeout(Duration::from_secs(15))
         .read_timeout(Duration::from_secs(60));
     if let Some(proxy) = proxy {
@@ -968,13 +969,13 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
                 "legacy".into()
             },
         ),
-        ("version_type", "CCL 0.1.10".into()),
+        ("version_type", format!("CCL {}", env!("CARGO_PKG_VERSION"))),
         (
             "natives_directory",
             base_dir.join("natives").to_string_lossy().to_string(),
         ),
         ("launcher_name", "CCL".into()),
-        ("launcher_version", "0.1.10".into()),
+        ("launcher_version", env!("CARGO_PKG_VERSION").into()),
         ("classpath", cp.join(sep)),
         ("classpath_separator", sep.into()),
         (
@@ -1044,8 +1045,10 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     use std::io::Write;
     writeln!(
         log,
-        "CCL 0.1.10 | 游戏版本 {} | 启动时间 {}",
-        options.version, stamp
+        "CCL {} | 游戏版本 {} | 启动时间 {}",
+        env!("CARGO_PKG_VERSION"),
+        options.version,
+        stamp
     )
     .map_err(|e| e.to_string())?;
     cmd.stdout(log.try_clone().map_err(|e| e.to_string())?)
@@ -1171,6 +1174,7 @@ fn main() {
             auth::cancel_microsoft_login,
             auth::logout_microsoft,
             auth::microsoft_account,
+            auth::restore_microsoft_account,
             auth::get_appearance,
             auth::preview_texture,
             auth::upload_account_skin,

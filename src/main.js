@@ -4,6 +4,8 @@ import './multiplayer.css';
 import './custom-theme.css';
 import './launch-screen.css';
 import './management.css';
+import { createJobManager } from './job-manager.js';
+import { version as appVersion } from '../package.json';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { createIcons, Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks } from 'lucide';
 import { invoke, isTauri } from '@tauri-apps/api/core';
@@ -13,7 +15,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 const icons = { Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks };
 let saved = {};
 try { saved = JSON.parse(localStorage.getItem('ccl-settings') || '{}') || {}; } catch { /* Recover from damaged local settings. */ }
-const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, versionQuery: '', accountMode: 'offline', account: null, browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, versionDelete: null, versionDeleting: false, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentSort: 'downloads', contentPage: 0, contentHasMore: false, contentLoaded: false, contentError: '', contentResults: [], contentBusy: false, localMods: [], modQuery: '', modFilter: 'all', selectedMods: new Set(), modWorking: false, modChecking: false, modUpdates: null, modDelete: null, jobs: [], jobLimit: Math.max(1, Math.min(5, Number(saved.jobLimit) || 3)), installDraft: null };
+const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, versionQuery: '', accountMode: 'offline', accountKnown: saved.accountKnown===true, accountPreference: saved.accountMode==='offline'?'offline':'microsoft', accountRestoring: isTauri(), accountRestoreError: '', restoreAttempt: null, account: null, browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, versionDelete: null, versionDeleting: false, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentSort: 'downloads', contentPage: 0, contentHasMore: false, contentLoaded: false, contentError: '', contentResults: [], contentBusy: false, localMods: [], modQuery: '', modFilter: 'all', selectedMods: new Set(), modWorking: false, modChecking: false, modUpdates: null, modDelete: null, jobs: [], jobLimit: Math.max(1, Math.min(5, Number(saved.jobLimit) || 3)), installDraft: null };
 const appearanceDefaults = { bannerOpacity: 0, backgroundOpacity: 35, backgroundFrost: 42, backgroundBlur: 8 };
 const clampAppearance = (value, fallback, max = 100) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(max, Number(value))) : fallback;
 const theme = { bannerOpacity: clampAppearance(saved.theme?.bannerOpacity, 0), backgroundOpacity: clampAppearance(saved.theme?.backgroundOpacity, 35), backgroundFrost: clampAppearance(saved.theme?.backgroundFrost, 42), backgroundBlur: clampAppearance(saved.theme?.backgroundBlur, 8, 30), banner: null, background: null };
@@ -104,7 +106,7 @@ function hydrateThumbnails() {
  if(!thumbnailObserver) thumbnailObserver=new IntersectionObserver(entries=>entries.forEach(entry=>{if(entry.isIntersecting){thumbnailObserver.unobserve(entry.target);const image=entry.target.querySelector('img[data-thumbnail-kind]');if(image)loadThumbnail(image);}}),{rootMargin:'120px'});
  thumbnailObserver.disconnect();images.forEach(image=>thumbnailObserver.observe(image.parentElement));
 }
-const persist = () => localStorage.setItem('ccl-settings', JSON.stringify({ selected: state.selected, username: state.username, javaPath: state.javaPath, proxyUrl: state.proxyUrl, gameDir: state.gameDir, memory: state.memory, optimize: state.optimize, jvmArgs: state.jvmArgs, gameArgs: state.gameArgs, jobLimit: state.jobLimit, theme: {bannerOpacity:theme.bannerOpacity,backgroundOpacity:theme.backgroundOpacity,backgroundFrost:theme.backgroundFrost,backgroundBlur:theme.backgroundBlur} }));
+const persist = () => localStorage.setItem('ccl-settings', JSON.stringify({ selected: state.selected, username: state.username, javaPath: state.javaPath, proxyUrl: state.proxyUrl, gameDir: state.gameDir, memory: state.memory, optimize: state.optimize, jvmArgs: state.jvmArgs, gameArgs: state.gameArgs, accountMode: state.accountPreference, accountKnown: state.accountKnown, jobLimit: state.jobLimit, theme: {bannerOpacity:theme.bannerOpacity,backgroundOpacity:theme.backgroundOpacity,backgroundFrost:theme.backgroundFrost,backgroundBlur:theme.backgroundBlur} }));
 let launchSequence = 0;
 let modEpoch = 0;
 const playerName = () => state.accountMode==='microsoft' && state.account ? state.account.name : state.username;
@@ -113,7 +115,7 @@ function flash(message, kind = '') { state.notice = message; state.noticeKind = 
 function shell() {
   return `<div class="app-shell"><header class="window-bar"><div class="window-drag" data-tauri-drag-region><span class="window-kicker" data-tauri-drag-region>CCL</span><span class="window-separator" data-tauri-drag-region></span><span class="window-title" data-tauri-drag-region>MINECRAFT LAUNCHER</span></div><div class="window-controls"><button data-window="minimize" aria-label="最小化" title="最小化">${icon('minus',15)}</button><button data-window="maximize" aria-label="最大化或还原" title="最大化或还原">${icon('square',12)}</button><button data-window="close" class="window-close" aria-label="关闭" title="关闭">${icon('x',16)}</button></div></header><aside class="sidebar"><div class="brand"><div class="brand-mark"><span></span><span></span><span></span><span></span></div><div><strong>CCL<span>.</span></strong><small>MINECRAFT 启动器</small></div></div>
   <nav class="nav"><button data-page="home" class="${state.page === 'home' ? 'active' : ''}">${icon('layout-grid')}<span>启动游戏</span></button><button data-page="versions" class="${state.page === 'versions' ? 'active' : ''}">${icon('layers-3')}<span>版本管理</span></button><button data-page="content" class="${state.page === 'content' ? 'active' : ''}">${icon('blocks')}<span>模组与整合包</span></button><button data-page="multiplayer" class="${state.page === 'multiplayer' ? 'active' : ''}">${icon('globe-2')}<span>多人联机</span></button><button data-page="downloads" class="${state.page === 'downloads' ? 'active' : ''}">${icon('download')}<span>下载任务</span><b class="job-badge">${activeJobCount() || ''}</b></button><button data-page="java" class="${state.page === 'java' ? 'active' : ''}">${icon('monitor')}<span>Java 管理</span></button><button data-page="account" class="${state.page === 'account' ? 'active' : ''}">${icon('user-round')}<span>账户与外观</span></button><button data-page="settings" class="${state.page === 'settings' ? 'active' : ''}">${icon('settings-2')}<span>启动设置</span></button></nav>
-  <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.10</span></div></div></aside>
+  <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v${esc(appVersion)}</span></div></div></aside>
   <main class="main"><header class="topbar"><div class="breadcrumbs"><strong>${{home:'启动游戏',versions:'版本管理',content:'模组与整合包',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'}[state.page]}</strong></div><div class="top-right"><div class="avatar">${esc(playerName().slice(0,1).toUpperCase())}</div><div class="profile"><strong>${esc(playerName())}</strong><small>${state.accountMode==='microsoft' && state.account ? '微软账户' : '离线玩家'}</small></div></div></header>
   <div class="content">${state.page === 'home' ? home() : state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage()}</div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
 }
@@ -121,7 +123,7 @@ function home() {
  const v = selected();
  return `<section class="hero home-hero"><div class="hero-art"><div class="sun"></div><div class="cloud cloud-a"></div><div class="cloud cloud-b"></div><div class="mountain mountain-back"></div><div class="mountain mountain-mid"></div><div class="mountain mountain-front"></div><div class="ground"></div><div class="tree tree-a"><i></i></div><div class="tree tree-b"><i></i></div><div class="tree tree-c"><i></i></div><div class="art-grid"></div><div class="hero-custom"></div></div><div class="hero-shade"></div><div class="hero-content"><div class="hero-kicker">MINECRAFT · JAVA 版</div><h1>准备好，<em>出发。</em></h1><p>你的世界，在这里继续。</p></div></section>
  <div class="section-title home-title"><h3>开始游戏</h3><button class="row-button log-link" data-action="open-log" ${!v?.installed ? 'disabled' : ''}>启动日志</button></div>
- <section class="launch-panel"><div class="launch-version"><div class="version-cube">${icon('blocks', 23)}</div><div><small>当前版本</small><strong>${v ? esc(v.name || v.id) : '选择一个版本'}</strong><span>${v?.installed ? `${esc(v.kind)} · 已安装` : '先在版本管理中安装游戏'}</span></div></div><button class="change-version" data-page="versions">切换版本 ${icon('chevron-down', 15)}</button><button class="play-button" data-action="launch" ${!v?.installed ? 'disabled' : ''}>${icon('play', 18)} 启动游戏</button></section>`;
+ <section class="launch-panel"><div class="launch-version"><div class="version-cube">${icon('blocks', 23)}</div><div><small>当前版本</small><strong>${v ? esc(v.name || v.id) : '选择一个版本'}</strong><span>${v?.installed ? `${esc(v.kind)} · 已安装` : '先在版本管理中安装游戏'}</span></div></div><button class="change-version" data-page="versions">切换版本 ${icon('chevron-down', 15)}</button><button class="play-button" data-action="launch" ${!v?.installed || (state.accountPreference==='microsoft' && (state.accountRestoring || (state.accountKnown && state.accountRestoreError))) ? 'disabled' : ''}>${icon('play', 18)} ${state.accountPreference==='microsoft' && state.accountRestoring?'正在恢复登录':state.accountPreference==='microsoft' && state.accountKnown && state.accountRestoreError?'登录待恢复':'启动游戏'}</button></section>`;
 }
 function multiplayerPage() {
  return `<div class="server-tabs" role="tablist" aria-label="联机功能"><button type="button" data-lan-view="room" role="tab" aria-selected="${state.lanView==='room'}">IPv6 房间</button><button type="button" data-lan-view="servers" role="tab" aria-selected="${state.lanView==='servers'}">公开服务器</button></div>${state.lanView==='room' ? lanRoomPage() : publicServersPage()}`;
@@ -274,7 +276,7 @@ function archiveDialog() {
 function launchScreen() {
  const v=state.launchView; if(!v) return '';
  const failed=v.phase==='failed',waiting=v.phase==='waiting';
- return `<div class="launch-screen ${failed?'launch-failed':''}" role="status" aria-live="polite"><div class="launch-stage"><div class="launch-album" aria-hidden="true"><div class="launch-disc"><div class="launch-disc-rotor"></div><div class="launch-disc-hub"></div></div><div class="launch-sleeve"><div class="launch-cover"></div><div class="launch-default-art"><i></i><i></i><i></i></div></div></div><div class="launch-screen-copy"><div class="launch-copy-header"><div><span class="launch-eyebrow">CCL / MINECRAFT</span><h2>${failed?'启动遇到问题':waiting?'等待游戏窗口':'正在准备游戏'}</h2></div><span class="launch-version-label">${esc(v.version)}</span></div><p>${failed?esc(v.error):v.warning?esc(v.warning):waiting?'游戏进程已启动，正在等待游戏窗口出现。':'正在准备游戏环境并启动 Java，请稍候。'}</p><div class="launch-progress ${failed?'failed':'preparing'}"><i></i></div><div class="launch-screen-actions">${failed&&state.crash?'<button class="save-button" data-action="open-crash-log">打开启动日志</button>':waiting?'<button class="outline-btn" data-action="open-log">查看启动日志</button>':''}<button class="outline-btn" data-action="close-launch-view">返回主页</button></div></div></div></div>`;
+ return `<div class="launch-screen ${failed?'launch-failed':''}" data-launch-id="${esc(v.id)}" role="status" aria-live="polite"><div class="launch-stage"><div class="launch-album" aria-hidden="true"><div class="launch-disc"><div class="launch-disc-rotor"></div><div class="launch-disc-hub"></div></div><div class="launch-sleeve"><div class="launch-cover"></div><div class="launch-default-art"><i></i><i></i><i></i></div></div></div><div class="launch-screen-copy"><div class="launch-copy-header"><div><span class="launch-eyebrow">CCL / MINECRAFT</span><h2>${failed?'启动遇到问题':waiting?'等待游戏窗口':'正在准备游戏'}</h2></div><span class="launch-version-label">${esc(v.version)}</span></div><p>${failed?esc(v.error):v.warning?esc(v.warning):waiting?'游戏进程已启动，正在等待游戏窗口出现。':'正在准备游戏环境并启动 Java，请稍候。'}</p><div class="launch-progress ${failed?'failed':'preparing'}"><i></i></div><div class="launch-screen-actions">${failed&&state.crash?'<button class="save-button" data-action="open-crash-log">打开启动日志</button>':waiting?'<button class="outline-btn" data-action="open-log">查看启动日志</button>':''}<button class="outline-btn" data-action="close-launch-view">返回主页</button></div></div></div></div>`;
 }
 function accountPage() {
  const signed=!!state.account, online=state.accountMode==='microsoft' && signed;
@@ -283,7 +285,8 @@ function accountPage() {
  return `<div class="page-heading inner-heading"><div><h1>账户与外观</h1><p>登录正版账户，预览和管理角色外观。</p></div></div>
  <div class="identity-layout"><div class="identity-main"><section class="identity-card"><div class="identity-section-head"><div><h2>玩家账户</h2><p>${online ? '当前使用微软正版账户。' : '当前使用离线账户。'}</p></div><span class="identity-status ${online?'online':''}">${online?'正版':'离线'}</span></div>
  <div class="identity-account"><div class="identity-user-icon">${icon('user-round',20)}</div><div><strong>${esc(online?state.account.name:state.username)}</strong><small>${online ? `Minecraft Java · ${esc(state.account.uuid)}` : '离线模式'}</small></div></div>
- <div class="identity-actions">${signed ? `<button class="row-button ${!online?'selected':''}" data-action="use-offline">使用离线账户</button><button class="row-button ${online?'selected':''}" data-action="use-microsoft">使用 ${esc(state.account.name)}</button><button class="row-button danger-button" data-action="logout-microsoft" ${state.accountBusy?'disabled':''}>退出登录</button>` : `<button class="save-button" data-action="begin-login" ${state.accountBusy?'disabled':''}>微软账户登录</button>`}</div>
+ <div class="identity-actions">${signed ? `<button class="row-button ${!online?'selected':''}" data-action="use-offline">使用离线账户</button><button class="row-button ${online?'selected':''}" data-action="use-microsoft">使用 ${esc(state.account.name)}</button><button class="row-button danger-button" data-action="logout-microsoft" ${state.accountBusy?'disabled':''}>退出登录</button>` : `<button class="save-button" data-action="begin-login" ${state.accountBusy||state.accountRestoring?'disabled':''}>${state.accountRestoring?'正在恢复登录…':'微软账户登录'}</button>`}</div>
+ ${!signed && state.accountRestoreError ? `<p class="identity-note">${esc(state.accountRestoreError)} <button class="text-link" data-action="retry-account-restore" ${state.accountRestoring?'disabled':''}>重试恢复</button> <button class="text-link" data-action="continue-offline">使用离线账户</button></p>` : ''}
  ${!signed && state.loginAttempt ? `<div class="browser-login-panel"><div class="browser-login-icon">${icon('globe-2',20)}</div><div><strong>${state.browserPrompt ? (state.browserPrompt.opened?'请在浏览器中登录':'无法自动打开浏览器') : '正在准备登录…'}</strong><p>${state.browserPrompt ? (state.browserPrompt.opened?'完成微软授权后，将自动返回启动器。':'请检查系统默认浏览器，然后重试。') : '正在启动系统浏览器。'}</p><div class="identity-actions">${state.browserPrompt?'<button class="row-button" data-action="open-microsoft-login">重新打开浏览器</button>':''}<button class="row-button" data-action="cancel-login">取消登录</button></div></div></div>` : ''}</section>
  <section class="identity-card"><div class="identity-section-head"><div><h2>皮肤</h2><p>选择 PNG 文件预览，登录后可应用到正版账户。</p></div><button class="row-button" data-action="choose-skin" ${state.accountBusy?'disabled':''}>选择皮肤</button></div><div class="skin-controls"><div class="skin-source"><strong>${esc(localSkin?.name || (state.appearance?.skin ? '当前账户皮肤' : signed ? '账户默认皮肤' : '尚未选择皮肤'))}</strong><small>${localSkin?'本地预览 · 尚未应用':state.appearance?.skin?'已从账户加载':signed?'暂无可预览的纹理':'请选择皮肤图片'}</small></div><label>模型<select id="skin-model"><option value="classic" ${state.skinModel==='classic'?'selected':''}>标准</option><option value="slim" ${state.skinModel==='slim'?'selected':''}>纤细</option></select></label>${localSkin?`<button class="row-button" data-action="clear-skin">清除预览</button><button class="save-button" data-action="upload-skin" ${!signed||state.accountBusy?'disabled':''}>应用到正版账户</button>`:''}</div><p class="identity-note">支持 64×64 或 64×32 PNG。离线模式的本地预览不会改变游戏内皮肤。</p>${signed?`<button class="text-link" data-action="reset-skin" ${state.accountBusy?'disabled':''}>恢复账户默认皮肤</button>`:''}</section>
  <section class="identity-card"><div class="identity-section-head"><div><h2>披风</h2><p>切换账户已有披风，或预览本地图片。</p></div><button class="row-button" data-action="choose-cape" ${state.accountBusy?'disabled':''}>预览本地披风</button></div>${localCape?`<div class="local-cape"><span>${esc(localCape.name)} · 仅预览</span><button class="row-button" data-action="clear-cape">清除预览</button></div>`:''}<div class="cape-list">${signed ? capes.length ? capes.map((cape,i)=>`<div class="cape-row ${state.previewCapeId===cape.id&&!localCape?'cape-previewed':''}"><div><strong>${esc(cape.name)}</strong><small>${cape.active?'当前使用':''}</small></div><button class="row-button" data-preview-cape="${i}" ${!cape.texture?'disabled':''}>预览</button><button class="row-button ${cape.active?'selected':''}" data-apply-cape="${i}" ${cape.active||state.accountBusy?'disabled':''}>${cape.active?'已使用':'使用'}</button></div>`).join('') : '<p class="identity-empty">账户暂无可用披风。</p>' : '<p class="identity-empty">登录后可管理账户拥有的披风。</p>'}</div>${signed && capes.some(c=>c.active)?`<button class="text-link" data-action="hide-cape" ${state.accountBusy?'disabled':''}>不使用披风</button>`:''}<p class="identity-note">正版披风由 Minecraft 账户授予，本地图片仅用于预览。</p></section></div>
@@ -305,35 +308,6 @@ async function refreshAppearance() {
  catch(e) { if(state.account?.uuid!==accountId) return; state.appearance=null; flash(`无法获取账户外观：${e}`,'error'); }
  if(state.page==='account') render();
 }
-function downloadsPage() {
- const running = state.jobs.filter(j=>j.status==='running'||j.status==='canceling').length;
- return `<div class="page-heading inner-heading"><div><h1>下载任务</h1><p class="job-summary">${running} 个任务进行中，最多同时运行 ${state.jobLimit} 个。</p></div><div class="heading-actions"><button class="outline-btn" data-action="cancel-all-jobs" ${activeJobCount()?'':'disabled'}>取消全部</button><button class="outline-btn" data-action="clear-jobs">清除已结束</button></div></div>
- <div class="job-settings"><label for="job-limit">同时运行任务</label><select id="job-limit">${[1,2,3,4,5].map(n=>`<option value="${n}" ${n===state.jobLimit?'selected':''}>${n} 个</option>`).join('')}</select><span>修改后对等待中的任务生效</span></div><div class="section-title"><div><h3>任务列表 <span class="count">${state.jobs.length}</span></h3></div></div><div id="job-list">${jobList()}</div>`;
-}
-function jobList() {
- if (!state.jobs.length) return `<div class="empty-state job-empty">${icon('download',27)}<strong>还没有下载任务</strong><p>选择游戏、Java 或模组后即可加入任务列表。</p></div>`;
- return state.jobs.slice().reverse().map(job => {
-  const labels={queued:'等待中',running:'进行中',canceling:'正在取消',cancelled:'已取消',done:'已完成',failed:'失败'};
-  const percent=job.total ? Math.min(100,Math.round(job.current/job.total*100)) : 0;
-  return `<article class="job-card ${job.status}" data-job-id="${esc(job.id)}"><div class="job-top"><div class="job-icon">${icon(job.kind==='java' ? 'monitor' : job.kind==='mod' ? 'blocks' : 'box',18)}</div><div class="job-info"><strong>${esc(job.title)}</strong><small class="job-message">${esc(job.message || labels[job.status])}</small></div><span class="job-state">${labels[job.status]}</span></div><div class="job-progress-line"><div class="progress-track"><i class="job-track" style="width:${job.status==='done' ? 100 : percent}%"></i></div><span class="job-count">${jobCount(job)}</span></div><div class="job-metrics">${esc(job.metrics || '')}</div>${job.error ? `<p class="job-error">${esc(job.error)}</p>` : ''}${['queued','running','canceling','failed','cancelled','done'].includes(job.status) ? `<div class="job-actions">${['queued','running','canceling'].includes(job.status)?`<button class="row-button" data-cancel-job="${esc(job.id)}" ${job.status==='canceling'?'disabled':''}>${job.status==='canceling'?'正在取消…':'取消任务'}</button>`:''}${['failed','cancelled'].includes(job.status)&&job.run?`<button class="row-button" data-retry-job="${esc(job.id)}">${icon('refresh-cw',14)} 重试</button>`:''}${['failed','cancelled','done'].includes(job.status)?`<button class="row-button" data-remove-job="${esc(job.id)}">移除记录</button>`:''}</div>` : ''}</article>`;
- }).join('');
-}
-function jobCount(job) { if(!job.total) return job.status==='queued'?'排队中':job.status==='done'?'完成':'—'; return job.kind==='java' ? `${(job.current/1048576).toFixed(1)} / ${(job.total/1048576).toFixed(1)} MB` : `${job.current} / ${job.total} 项`; }
-function saveJobs() { try { localStorage.setItem('ccl-job-history',JSON.stringify(state.jobs.slice(-100).map(({id,key,kind,title,status,gameDir,version,recipe})=>({id,key,kind,title,status,gameDir,version,recipe})))); } catch {} }
-function runnerFor(recipe) {
- if(!recipe || typeof recipe!=='object') return null;
- if(recipe.type==='java') return async job=>{const java=await invoke('install_java',{major:recipe.major,jobId:job.id});if(state.javaPath==='java'||!state.javaPath){state.javaPath=java.path;persist();}};
- if(recipe.type==='game') return job=>runGameJob(job,recipe.draft,recipe.gameDir,recipe.javaPath);
- if(recipe.type==='mod' || recipe.type==='modpack') return job=>{const apiKey=recipe.source==='curseforge'?state.contentKey:'';if(recipe.source==='curseforge'&&!apiKey.trim()) throw new Error('请先在模组页面重新输入 CurseForge API Key');const args={gameDir:recipe.gameDir,source:recipe.source,projectId:recipe.projectId,apiKey,jobId:job.id};return recipe.type==='mod'?invoke('install_mod',{...args,version:recipe.version,modVersionId:recipe.modVersionId}):invoke('install_modpack',{...args,javaPath:recipe.javaPath});};
- return null;
-}
-function restoreJobs() { try { const list=JSON.parse(localStorage.getItem('ccl-job-history')||'[]');if(!Array.isArray(list))return;state.jobs=list.slice(-100).filter(j=>j && typeof j.title==='string' && typeof j.id==='string').map(j=>({...j,status:['queued','running','canceling'].includes(j.status)?'failed':j.status,message:['queued','running','canceling'].includes(j.status)?(j.recipe?'任务因启动器关闭而中断，请重试。':'任务因启动器关闭而中断，请重新添加。'):'上次运行的任务记录',error:'',current:0,total:0,run:runnerFor(j.recipe)})); } catch {} }
-function renderJobList() { const summary=app.querySelector('.job-summary');if(summary)summary.textContent=`${state.jobs.filter(j=>j.status==='running'||j.status==='canceling').length} 个任务进行中，最多同时运行 ${state.jobLimit} 个。`;const list=app.querySelector('#job-list'); if (list) { list.innerHTML=jobList(); hydrateIcons(); } renderChrome(); }
-function updateJob(job, patch) {
- Object.assign(job,patch);
- const card=app.querySelector(`[data-job-id="${job.id}"]`);
- if (card) { const message=card.querySelector('.job-message'); if (message) message.textContent=job.message || ''; const count=card.querySelector('.job-count'); if (count) count.textContent=jobCount(job); const metrics=card.querySelector('.job-metrics');if(metrics)metrics.textContent=job.metrics||''; const track=card.querySelector('.job-track'); if (track) track.style.width=job.total ? `${Math.min(100,Math.round(job.current/job.total*100))}%` : '0%'; }
-}
 async function refreshInstalled(dir) {
  if (dir !== state.gameDir) return;
  try {
@@ -344,55 +318,15 @@ async function refreshInstalled(dir) {
   if (state.page==='versions' || state.page==='home') render(); else renderChrome();
  } catch (e) { flash(`无法刷新已安装版本：${e}`,'error'); }
 }
-let jobSerial=0;
-function hasJob(key) { return state.jobs.some(j=>j.key===key && (['queued','running','canceling'].includes(j.status))); }
-function enqueueJob(spec) {
- if (hasJob(spec.key)) { flash('该项目已在下载任务中。'); return; }
- const job={...spec,id:`job-${Date.now()}-${++jobSerial}`,status:'queued',message:'等待中',current:0,total:0,error:''};
- state.jobs.push(job); saveJobs();renderJobList(); flash(`已加入下载任务：${job.title}`); pumpJobs();
-}
-function pumpJobs() {
- while (state.jobs.filter(j=>j.status==='running'||j.status==='canceling').length < state.jobLimit) {
-  const job=state.jobs.find(j=>j.status==='queued'); if (!job) break;
-  job.status='running'; job.message='正在准备';saveJobs(); renderJobList();
-  Promise.resolve().then(async()=>{ await invoke('begin_job',{jobId:job.id,gameDir:job.gameDir||null});job.registered=true;if(job.cancelRequested){await invoke('cancel_job',{jobId:job.id});throw new Error('任务已取消');}await job.run(job); }).then(()=>{ job.status='done'; job.message=job.kind==='export'?'导出完成':job.kind==='import'?'导入完成':'安装完成'; job.current=job.total; }).catch(e=>{ if(job.cancelRequested){job.status='cancelled';job.message='已取消';job.error='';} else {job.status='failed'; job.message=job.kind==='export'?'导出失败':job.kind==='import'?'导入失败':'安装失败'; job.error=String(e);} }).finally(async()=>{
-   if(job.registered) {try {await invoke('end_job',{jobId:job.id});} catch(e) {flash(`任务清理失败：${e}`,'error');}}
-   if (job.gameDir) await refreshInstalled(job.gameDir);
-   if (job.kind==='java') { try { state.javaRuntimes=await invoke('list_java'); if(state.page==='java') render(); } catch {} }
-   if (job.kind==='mod' && job.version===state.contentTarget && job.gameDir===state.gameDir) { modEpoch++;state.modUpdates=null;if(state.page==='content'){await refreshMods(); await searchContent();} }
-   saveJobs();renderJobList(); pumpJobs();
-  });
+const { downloadsPage, saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, enqueueJob, pumpJobs, requestJobCancel, jobEvent, queueVersion, activeJobCount } = createJobManager({
+ state, app, invoke, persist, esc, icon, hydrateIcons, renderChrome, flash, render, refreshInstalled,
+ onJobFinished: async job => {
+  if (job.kind==='mod' && job.version===state.contentTarget && job.gameDir===state.gameDir) {
+   modEpoch++;state.modUpdates=null;
+   if(state.page==='content'){await refreshMods();await searchContent();}
+  }
  }
-}
-async function requestJobCancel(job) {
- if(job.status==='queued'){job.status='cancelled';job.message='已取消';saveJobs();renderJobList();return;}
- if(job.status!=='running')return;
- job.cancelRequested=true;job.status='canceling';job.message='正在取消并清理…';saveJobs();renderJobList();
- if(job.registered){try{await invoke('cancel_job',{jobId:job.id});}catch(e){if(job.status==='canceling'){job.cancelRequested=false;job.status='running';job.message='取消失败，任务仍在进行';renderJobList();flash(`取消失败：${e}`,'error');}}}
-}
-function jobEvent(payload) {
- const job=state.jobs.find(j=>j.id===payload.jobId); if (!job || job.status!=='running') return;
- const current=Number(payload.current)||0,total=Number(payload.total)||0,now=Date.now();let metrics='';
- if(job.kind==='java' && payload.message==='正在下载 Java' && total>0) {
-  const previous=job.lastSample;
-  if(previous && now>previous.time && current>=previous.current && previous.total===total) { const speed=(current-previous.current)*1000/(now-previous.time);if(speed>0){const remaining=Math.max(0,Math.ceil((total-current)/speed));metrics=`${(speed/1048576).toFixed(2)} MB/s · 预计 ${remaining>=60?`${Math.floor(remaining/60)} 分 ${remaining%60} 秒`:`${remaining} 秒`}`;} }
-  job.lastSample={time:now,current,total};
- } else job.lastSample=null;
- updateJob(job,{message:payload.message,current,total,metrics});
-}
-async function runGameJob(job,draft,gameDir,javaPath) {
- const selectedVersion=draft.version;
- await invoke('install_version',{version:selectedVersion,gameDir,jobId:job.id});
- if(job.cancelRequested) throw new Error('任务已取消');
- const result=draft.loader==='vanilla' ? selectedVersion : await invoke('install_loader',{gameVersion:selectedVersion,gameDir,loader:draft.loader,loaderVersion:null,javaPath,jobId:job.id});
- job.resultVersion=result;
- for (let i=0;i<draft.addons.length;i++) { if(job.cancelRequested) throw new Error('任务已取消'); updateJob(job,{message:`正在安装附加模组 ${draft.addons[i]}（${i+1}/${draft.addons.length}）`,current:0,total:0}); try { await invoke('install_mod',{gameDir,version:result,source:'modrinth',projectId:draft.addons[i],apiKey:'',modVersionId:null,jobId:job.id}); } catch(e) { if(job.cancelRequested) throw e; if(String(e).includes('该模组已安装到目标实例')) continue; throw `游戏和加载器已安装；附加模组 ${draft.addons[i]} 安装失败：${e}`; } }
-}
-function queueVersion(draft) {
- const gameDir=state.gameDir,javaPath=state.javaPath,selectedVersion=draft.version;
- const recipe={type:'game',draft,gameDir,javaPath};
- enqueueJob({key:`game:${gameDir}:${selectedVersion}:${draft.loader}`,kind:'game',title:`Minecraft ${selectedVersion}${draft.loader==='vanilla'?'':` · ${draft.loader}`}`,gameDir,recipe,run:runnerFor(recipe)});
-}
+});
 function javaPage() {
  const runtimes = state.javaRuntimes;
  const options = [8, 17, 21, 25];
@@ -413,17 +347,26 @@ async function refreshJava() {
 let renderedPage = null;
 let composingSearch = false;
 let pendingCompositionRender = false;
-function activeJobCount() { return state.jobs.filter(j => ['queued','running','canceling'].includes(j.status)).length; }
 function renderChrome() {
  const root = app.querySelector('#toast-root'); if (!root) return;
  root.innerHTML = state.notice ? `<div class="toast ${state.noticeKind}">${esc(state.notice)}${state.crash ? '<button class="toast-log" data-action="open-crash-log">查看日志</button>' : ''}<button data-action="dismiss" aria-label="关闭">${icon('x',15)}</button></div>` : '';
  const badge = app.querySelector('.job-badge'); if (badge) { const n = activeJobCount(); badge.textContent = n ? String(n) : ''; badge.classList.toggle('has-jobs', !!n); }
  const cancelAll=app.querySelector('[data-action="cancel-all-jobs"]');if(cancelAll)cancelAll.disabled=!state.jobs.some(j=>j.status==='queued'||j.status==='running');
- const footer = app.querySelector('.side-footer'); if (footer) footer.innerHTML = `<span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v0.1.10</span>`;
+ const footer = app.querySelector('.side-footer'); if (footer) footer.innerHTML = `<span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v${esc(appVersion)}</span>`;
  const count = app.querySelector('.side-card strong'); if (count) count.innerHTML = `${String(state.versions.filter(v=>v.installed).length).padStart(2,'0')} <small>个版本</small>`;
  hydrateIcons();
 }
-function renderOverlay() { const root = app.querySelector('#modal-root'); if (!root) return; root.innerHTML = state.launchView ? launchScreen() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : ''; hydrateIcons(); }
+function renderOverlay() {
+ const root=app.querySelector('#modal-root');if(!root)return;
+ const current=root.querySelector('.launch-screen');
+ if(state.launchView && current?.dataset.launchId===state.launchView.id) {
+  const template=document.createElement('template');template.innerHTML=launchScreen();
+  const next=template.content.querySelector('.launch-screen');
+  current.classList.toggle('launch-failed',state.launchView.phase==='failed');
+  current.querySelector('.launch-screen-copy').innerHTML=next.querySelector('.launch-screen-copy').innerHTML;
+ } else root.innerHTML=state.launchView ? launchScreen() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '';
+ hydrateIcons();
+}
 function render() {
  if(composingSearch && renderedPage===state.page) { pendingCompositionRender=true;return; }
  if(composingSearch && renderedPage!==state.page) { composingSearch=false;pendingCompositionRender=false; }
@@ -522,16 +465,17 @@ app.addEventListener('click', async event => {
  if(action==='confirm-export' && state.archiveDraft?.kind==='export') { const d=state.archiveDraft,includeSaves=!!app.querySelector('#archive-saves')?.checked,exportFormat=app.querySelector('input[name=archiveFormat]:checked')?.value||'ccl'; try { const path=await saveDialog({defaultPath:`CCL-${d.version}.${exportFormat==='pcl'?'mrpack':'zip'}`,filters:[{name:exportFormat==='pcl'?'PCL 兼容整合包':'CCL 游戏导出包',extensions:[exportFormat==='pcl'?'mrpack':'zip']}]}); if(!path) return; const launchSettings={memory:Number(state.memory),optimize:state.optimize,jvmArgs:state.jvmArgs,gameArgs:state.gameArgs}; state.archiveDraft=null;renderOverlay(); enqueueJob({key:`export:${d.gameDir}:${d.version}:${path}`,kind:'export',title:`导出 · ${d.version}`,gameDir:d.gameDir,run:job=>invoke('export_game',{gameDir:d.gameDir,version:d.version,path,includeSaves,launchSettings,exportFormat,jobId:job.id})}); } catch(e) { flash(`导出失败：${e}`,'error'); } return; }
  if(action==='confirm-import' && state.archiveDraft?.kind==='import') { const d=state.archiveDraft,restoreSettings=!!app.querySelector('#archive-settings')?.checked; state.archiveDraft=null;renderOverlay();enqueueJob({key:`import:${d.gameDir}:${d.path}`,kind:'import',title:`导入 · ${d.manifest.name}`,gameDir:d.gameDir,run:async job=>{const result=await invoke('import_game',{gameDir:d.gameDir,path:d.path,javaPath:d.javaPath,jobId:job.id}); if(d.gameDir===state.gameDir) { state.selected=result.version; if(restoreSettings && result.launchSettings) Object.assign(state,result.launchSettings); persist(); } }});return; }
  if(action==='close-launch-view') { state.launchView=null; renderOverlay(); return; }
- if(action==='begin-login') {
+ if(action==='begin-login' && !state.accountRestoring) {
   const attempt={}; state.loginAttempt=attempt;state.browserPrompt=null;render();
-  try { const prompt=await invoke('begin_microsoft_login'); if(state.loginAttempt!==attempt) return; state.browserPrompt=prompt;render(); const account=await invoke('complete_microsoft_login'); if(state.loginAttempt!==attempt) return; state.account=account;state.accountMode='microsoft';state.loginAttempt=null;state.browserPrompt=null;render(); await refreshAppearance(); }
+  try { const prompt=await invoke('begin_microsoft_login'); if(state.loginAttempt!==attempt) return; state.browserPrompt=prompt;render(); const account=await invoke('complete_microsoft_login'); if(state.loginAttempt!==attempt) return; state.account=account;state.accountMode='microsoft';state.accountKnown=true;state.accountPreference='microsoft';state.accountRestoreError='';state.loginAttempt=null;state.browserPrompt=null;persist();render();if(account.remembered===false)flash('登录成功，但无法保存登录状态；请检查系统凭据库，重启后可能需要重新登录。','error');await refreshAppearance(); }
   catch(e) { if(state.loginAttempt===attempt) { state.loginAttempt=null;state.browserPrompt=null;render();flash(`登录失败：${e}`,'error'); } } return;
  }
- if(action==='cancel-login') { state.loginAttempt=null;state.browserPrompt=null;render(); try { await invoke('cancel_microsoft_login'); } catch(e) { flash(String(e),'error'); } return; }
+ if(action==='cancel-login') { state.loginAttempt=null;state.browserPrompt=null;state.accountBusy=true;render(); try { await invoke('cancel_microsoft_login');if(await invoke('microsoft_account')) await invoke('logout_microsoft'); } catch(e) { flash(String(e),'error'); } finally { state.accountBusy=false;render(); } return; }
+ if(action==='retry-account-restore' && !state.accountRestoring) {void restoreAccount();return;}
  if(action==='open-microsoft-login') { try { await invoke('open_microsoft_login'); } catch(e) { flash(String(e),'error'); } return; }
- if(action==='use-offline') { state.accountMode='offline';render();return; }
- if(action==='use-microsoft' && state.account) { state.accountMode='microsoft';render();return; }
- if(action==='logout-microsoft') { state.accountBusy=true;render();try { await invoke('logout_microsoft');state.account=null;state.accountMode='offline';state.appearance=null;state.previewCapeId=''; } catch(e) { flash(String(e),'error'); } state.accountBusy=false;render();return; }
+ if(action==='use-offline' || action==='continue-offline') { state.accountMode='offline';state.accountPreference='offline';persist();render();return; }
+ if(action==='use-microsoft' && state.account) { state.accountMode='microsoft';state.accountPreference='microsoft';persist();render();return; }
+ if(action==='logout-microsoft') { state.accountBusy=true;render();try { await invoke('logout_microsoft'); } catch(e) { flash(String(e),'error'); } finally { state.account=null;state.accountMode='offline';state.accountKnown=false;state.accountPreference='offline';state.accountRestoreError='';state.appearance=null;state.previewCapeId='';state.accountBusy=false;persist();render(); } return; }
  if(action==='choose-skin' || action==='choose-cape') { const kind=action==='choose-skin'?'skin':'cape';try { const path=await openDialog({multiple:false,directory:false,filters:[{name:'PNG 图片',extensions:['png']}]}); if(typeof path!=='string') return;const data=await invoke('preview_texture',{path,kind});const file={path,data,name:path.split(/[\\/]/).pop()};if(kind==='skin') state.localSkin=file;else state.localCape=file;render(); } catch(e) { flash(`无法预览图片：${e}`,'error'); } return; }
  if(action==='clear-skin') { state.localSkin=null;render();return; }
  if(action==='clear-cape') { state.localCape=null;render();return; }
@@ -580,10 +524,26 @@ app.addEventListener('compositionstart', event => { if(event.target.matches('inp
 app.addEventListener('compositionend', event => { if(!composingSearch)return;composingSearch=false; if(event.target.id==='server-search') {state.serverQuery=event.target.value;state.serverPage=0;} else if(event.target.id==='version-filter') state.versionQuery=event.target.value; else if(event.target.id==='local-mod-search') state.modQuery=event.target.value; if(pendingCompositionRender) {pendingCompositionRender=false;render();} else if(event.target.id==='server-search'||event.target.id==='version-filter') updateSearchResults(event.target.id==='server-search'?'server':'version'); else if(event.target.id==='local-mod-search') renderLocalMods(); });
 app.addEventListener('input', event => { if(event.target.id==='local-mod-search') {if(composingSearch||event.isComposing)return;state.modQuery=event.target.value;renderLocalMods();return;} if(event.target.dataset.themeSetting) { const key=event.target.dataset.themeSetting;theme[key]=clampAppearance(event.target.value,appearanceDefaults[key],key==='backgroundBlur'?30:100);event.target.closest('.theme-control').querySelector('output').textContent=`${theme[key]}${key==='backgroundBlur'?' px':'%'}`;applyTheme();persist();return; } if(event.target.id==='server-search') { if(composingSearch || event.isComposing) return; state.serverQuery=event.target.value;state.serverPage=0;updateSearchResults('server');return; } if(event.target.id==='lan-game-port') state.lanPort=event.target.value; if(event.target.id==='lan-target') { state.lanTarget=event.target.value; state.lanTest=''; } if(event.target.id==='version-filter') { if(composingSearch || event.isComposing) return; state.versionQuery=event.target.value; updateSearchResults('version'); return; } if (event.target.id === 'proxyUrl') event.target.setCustomValidity(''); if (event.target.id === 'memory') event.target.closest('.field').querySelector('label span').textContent = `${event.target.value} MB`; });
 app.addEventListener('submit', async event => { if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentSort=data.get('sort');state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey);state.contentPage=0;state.contentHasMore=false; await searchContent(); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory')), optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); if(changed){state.selectedMods.clear();state.modUpdates=null;modEpoch++;} render(); flash('设置已保存。'); if (changed) await refresh(); });
+async function restoreAccount() {
+ const attempt={};state.restoreAttempt=attempt;state.accountRestoring=true;state.accountRestoreError='';render();
+ try {
+  const account=await invoke('restore_microsoft_account');
+  if(state.restoreAttempt!==attempt)return;
+  if(account && !state.account && !state.loginAttempt) {
+   state.account=account;state.accountKnown=true;state.accountMode=state.accountPreference==='offline'?'offline':'microsoft';persist();
+   if(account.remembered===false)flash('账户已恢复，但无法保存新的登录状态；请检查系统凭据库。','error');
+   if(state.page==='account')void refreshAppearance();
+  } else if(!account && state.accountKnown && state.accountPreference==='microsoft') {state.accountRestoreError='未找到已保存的账户，请重新登录或使用离线账户。';flash(state.accountRestoreError,'error');}
+ } catch(e) {
+  if(state.restoreAttempt===attempt) {state.accountRestoreError=`账户恢复失败：${e}。可检查网络后重试或重新登录。`;flash(state.accountRestoreError,'error');}
+ } finally {
+  if(state.restoreAttempt===attempt){state.restoreAttempt=null;state.accountRestoring=false;render();}
+ }
+}
 async function init() {
  restoreJobs();render();
  restoreThemeImages();
  if (!isTauri()) { state.notice = '请在 Tauri 桌面应用中使用启动器。'; state.noticeKind = 'error'; render(); return; }
- try { await invoke('configure_proxy', { proxyUrl: state.proxyUrl }); if (!state.gameDir) state.gameDir = await invoke('default_game_dir'); await listen('java-progress', e => jobEvent(e.payload)); await listen('install-progress', e => jobEvent(e.payload)); await listen('game-window-ready', e => {const view=state.launchView;if(view && e.payload.launchId===view.id){state.launchView=null;state.page='home';render();}}); await listen('game-window-status', e => {const view=state.launchView;if(view && e.payload.launchId===view.id){view.warning=e.payload.status==='unavailable'?'当前桌面暂时无法确认游戏窗口；窗口出现后可手动返回主页。':'等待时间较长，可查看启动日志或手动返回主页。';renderOverlay();}}); await listen('game-exit', e => { const sameLaunch=state.launchView && (e.payload.launchId ? state.launchView.id===e.payload.launchId : state.launchView.version===e.payload.version); if(!e.payload.success) { state.crash={version:e.payload.version,gameDir:e.payload.gameDir,logName:e.payload.logPath.split(/[\\/]/).pop()}; if(sameLaunch) { state.launchView.phase='failed'; state.launchView.error=`游戏异常退出（代码 ${e.payload.code ?? '未知'}），可以打开启动日志查看详情。`; renderOverlay(); } else flash(`游戏 ${e.payload.version} 异常退出（代码 ${e.payload.code ?? '未知'}）。`,'error'); } else if(sameLaunch) { state.crash={version:e.payload.version,gameDir:e.payload.gameDir,logName:e.payload.logPath.split(/[\\/]/).pop()};state.launchView.phase='failed';state.launchView.error='游戏进程已退出，未检测到游戏窗口。可以打开启动日志查看详情。';renderOverlay(); } }); await refresh(); } catch (e) { flash(String(e), 'error'); }
+ try { await invoke('configure_proxy', { proxyUrl: state.proxyUrl }); if (!state.gameDir) state.gameDir = await invoke('default_game_dir'); await listen('java-progress', e => jobEvent(e.payload)); await listen('install-progress', e => jobEvent(e.payload)); await listen('game-window-ready', e => {const view=state.launchView;if(view && e.payload.launchId===view.id){state.launchView=null;state.page='home';render();}}); await listen('game-window-status', e => {const view=state.launchView;if(view && e.payload.launchId===view.id){view.warning=e.payload.status==='unavailable'?'当前桌面暂时无法确认游戏窗口；窗口出现后可手动返回主页。':'等待时间较长，可查看启动日志或手动返回主页。';renderOverlay();}}); await listen('game-exit', e => { const sameLaunch=state.launchView && (e.payload.launchId ? state.launchView.id===e.payload.launchId : state.launchView.version===e.payload.version); if(!e.payload.success) { state.crash={version:e.payload.version,gameDir:e.payload.gameDir,logName:e.payload.logPath.split(/[\\/]/).pop()}; if(sameLaunch) { state.launchView.phase='failed'; state.launchView.error=`游戏异常退出（代码 ${e.payload.code ?? '未知'}），可以打开启动日志查看详情。`; renderOverlay(); } else flash(`游戏 ${e.payload.version} 异常退出（代码 ${e.payload.code ?? '未知'}）。`,'error'); } else if(sameLaunch) { state.crash={version:e.payload.version,gameDir:e.payload.gameDir,logName:e.payload.logPath.split(/[\\/]/).pop()};state.launchView.phase='failed';state.launchView.error='游戏进程已退出，未检测到游戏窗口。可以打开启动日志查看详情。';renderOverlay(); } }); void restoreAccount(); await refresh(); } catch (e) { state.accountRestoring=false;render();flash(String(e), 'error'); }
 }
 init();

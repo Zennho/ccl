@@ -32,7 +32,7 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 
 ## 使用须知
 
-- **正版登录**：CCL 已配置微软应用，玩家无需输入客户端 ID；但该应用仍需获得 Minecraft 服务授权，审核状态以官方回复为准。离线模式无法加入要求正版验证的服务器。登录令牌仅保存在运行时内存中，重启后需要重新登录。
+- **正版登录**：CCL 已配置微软应用，玩家无需输入客户端 ID；该应用已获得 Minecraft 服务授权。离线模式无法加入要求正版验证的服务器。刷新令牌保存在系统凭据管理器中，重启后自动恢复；凭据库不可用或登录授权失效时需要重新登录。
 - **CurseForge**：浏览和下载需要自行提供 API Key；部分项目作者不允许第三方启动器下载文件。Modrinth 已安装项目通过文件哈希识别；CurseForge 通过 CCL 安装记录识别。
 - **联机与服务器**：跨网络连接需要双方有可互通的 IPv6，房主的路由器与防火墙允许入站 TCP。房间没有额外访问验证，请只向信任的人分享地址。公开服务器的在线状态和人数是每日快照，不代表实时状态。
 - **游戏数据**：默认游戏目录位于系统应用数据目录下的 `ccl/minecraft`，可在启动设置中修改。删除版本默认保留共用数据；选择删除独立实例数据时，实例内的存档和模组也会删除。导出包不包含日志、截图和账户信息。
@@ -42,7 +42,7 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 
 ### 环境准备
 
-安装 Node.js 22、Rust，以及 [Tauri 2 对应平台的系统依赖](https://v2.tauri.app/start/prerequisites/)。Linux 构建需要 WebKitGTK 等开发包，Windows 需要 Microsoft C++ 构建工具和 WebView2，macOS 需要 Xcode 命令行工具；以 Tauri 文档为准。
+安装 Node.js 22、Rust，以及 [Tauri 2 对应平台的系统依赖](https://v2.tauri.app/start/prerequisites/)。Linux 构建需要 WebKitGTK、D-Bus 等开发包，Windows 需要 Microsoft C++ 构建工具和 WebView2，macOS 需要 Xcode 命令行工具；以 Tauri 文档为准。
 
 ```bash
 git clone https://github.com/Zennho/ccl.git
@@ -54,13 +54,17 @@ npm run tauri dev
 常用命令：
 
 ```bash
-npm test                                   # 界面及交互测试
+npm run check                              # 版本一致性、前端测试和构建
+npm test                                   # 下载队列及界面交互测试
+cargo fmt --manifest-path src-tauri/Cargo.toml --check    # Rust 格式检查
 cargo test --manifest-path src-tauri/Cargo.toml --locked  # Rust 后端测试
 npm run build                              # 构建前端资源
 npm run tauri build                        # 构建当前平台的桌面安装包
 ```
 
-桌面安装包通常需要在对应操作系统上构建。项目的 [发布工作流](.github/workflows/release.yml) 分别构建 Windows、Linux 和两种 macOS 架构，并在所有构建成功后发布。
+提交和拉取请求会运行 [检查工作流](.github/workflows/check.yml)，验证版本一致性、前端测试和构建、Rust 格式及后端测试。桌面安装包通常需要在对应操作系统上构建；[发布工作流](.github/workflows/release.yml) 分别构建 Windows、Linux 和两种 macOS 架构，并在所有构建成功后发布。
+
+发布新版本时，将 `package.json`、`package-lock.json`、`src-tauri/Cargo.toml`、`src-tauri/Cargo.lock` 与 `src-tauri/tauri.conf.json` 的版本号同步，更新 `.github/release-notes.md`，运行 `npm run check:version`，然后手动运行发布工作流。工作流会使用项目版本号创建对应的 Git 标签和 Release。
 
 构建者可以通过 `CCL_MICROSOFT_CLIENT_ID` 环境变量覆盖默认微软应用 ID。自行注册的应用需要支持个人账户、启用公共客户端流程、将 `http://localhost` 注册为移动和桌面应用重定向 URI，并获得 Minecraft 服务授权；参考 [微软桌面应用注册文档](https://learn.microsoft.com/en-us/azure/active-directory/develop/scenario-desktop-app-registration)。
 
@@ -68,8 +72,10 @@ npm run tauri build                        # 构建当前平台的桌面安装�
 
 ```text
 src/                  界面、交互与样式
+src/job-manager.js    下载队列、进度、取消和恢复
 src-tauri/src/        Tauri 命令、游戏安装、账户与其他后端功能
-tests/                界面交互测试
+tests/                界面交互及下载队列测试
+scripts/              开发与版本一致性检查
 .github/workflows/    跨平台构建与发布流程
 ```
 
