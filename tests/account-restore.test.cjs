@@ -7,7 +7,7 @@ const { IDBFactory } = require('fake-indexeddb');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings} = {}) {
+function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings, rememberAccount} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w = dom.window;
   const calls = [];
@@ -23,6 +23,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch, app
     if(name==='list_versions'||name==='installed_versions')return versions;
     if(name==='restore_microsoft_account')return restore ? restore() : null;
     if(name==='logout_microsoft')return logout ? logout() : undefined;
+    if(name==='remember_microsoft_account')return rememberAccount ? rememberAccount() : null;
     if(name==='launch_game')return launch ? launch(args) : undefined;
     if(name==='get_appearance')return appearance ? appearance() : {skin:null,model:'classic',capes:[]};
     if(name==='preview_texture')return selectedSkin;
@@ -233,7 +234,11 @@ test('instance launch settings are isolated per version and can return to global
  try {
   await tick();app.click('[data-page="settings"]');
   const form=app.w.document.querySelector('#instance-settings-form');
-  form.elements.javaPath.value='/java/one';form.elements.memoryMode.value='manual';form.elements.memory.value='6144';form.elements.jvmArgs.value='-Dexample=true';form.elements.gameArgs.value='--width 1200';
+  form.elements.javaPath.value='/java/one';form.elements.memoryMode.value='manual';form.elements.memoryMode.dispatchEvent(new app.w.Event('change',{bubbles:true}));
+  const slider=form.querySelector('#instance-memory-range'),memory=form.elements.memory;assert.equal(form.querySelector('#instance-memory-manual').hidden,false);assert.equal(slider.disabled,false);
+  slider.value='6144';slider.dispatchEvent(new app.w.Event('input',{bubbles:true}));assert.equal(memory.value,'6144');
+  memory.value='7168';memory.dispatchEvent(new app.w.Event('input',{bubbles:true}));assert.equal(slider.value,'7168');
+  memory.value='6144';memory.dispatchEvent(new app.w.Event('input',{bubbles:true}));form.elements.jvmArgs.value='-Dexample=true';form.elements.gameArgs.value='--width 1200';
   form.dispatchEvent(new app.w.Event('submit',{bubbles:true,cancelable:true}));
   const stored=JSON.parse(app.w.localStorage.getItem('ccl-instance-launch-settings'));
   assert.equal(stored[JSON.stringify(['/game','1.20.1'])].javaPath,'/java/one');
@@ -325,4 +330,19 @@ test('failed skin refresh keeps the cached avatar until a successful empty respo
  }finally{app.close();}
  const again=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>new Promise(()=>{})});
  try {await tick();await tick();assert.equal(again.w.document.querySelector('.avatar-face'),null);}finally{again.close();}
+});
+
+
+test('shows a safe keychain error and can retry saving without signing in again', async () => {
+ const app=boot({known:true,restore:()=>({name:'RealPlayer',uuid:'abc',remembered:false,rememberError:'写入系统钥匙串失败（macOS 错误 -25308）'}),rememberAccount:()=>({name:'RealPlayer',uuid:'abc',remembered:true})});
+ try {
+  await tick();await tick();app.click('[data-page="account"]');await tick();
+  assert.match(app.w.document.querySelector('.identity-card').textContent,/macOS 错误 -25308/);
+  assert.ok(app.w.document.querySelector('[data-action="retry-save-account"]'));
+  app.click('[data-action="retry-save-account"]');await tick();
+  assert.ok(!app.w.document.querySelector('[data-action="retry-save-account"]'));
+  assert.equal(app.calls.filter(c=>c.name==='remember_microsoft_account').length,1);
+  assert.equal(app.calls.filter(c=>c.name==='restore_microsoft_account').length,1);
+  assert.match(app.w.document.querySelector('.toast').textContent,/登录状态已保存/);
+ } finally {app.close();}
 });

@@ -48,6 +48,7 @@ struct Session {
     xuid: String,
     generation: u64,
     remembered: bool,
+    remember_error: Option<String>,
 }
 #[derive(Default)]
 struct AuthState {
@@ -72,6 +73,8 @@ pub struct AccountInfo {
     name: String,
     uuid: String,
     remembered: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remember_error: Option<String>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -100,6 +103,7 @@ fn info(s: &Session) -> AccountInfo {
         name: s.name.clone(),
         uuid: s.uuid.clone(),
         remembered: s.remembered,
+        remember_error: s.remember_error.clone(),
     }
 }
 fn valid_client_id(id: &str) -> bool {
@@ -554,26 +558,57 @@ pub async fn complete_microsoft_login() -> ResultT<AccountInfo> {
         xuid,
         generation: pending.generation,
         remembered: false,
+        remember_error: None,
     };
     let mut s = state().lock().await;
     if s.generation != pending.generation {
         return Err("登录已取消".into());
     }
     let mut session = session;
-    if let Some(refresh_token) = session.refresh_token.as_ref() {
-        session.remembered = credentials::save(credentials::StoredAccount {
-            client_id: session.client_id.clone(),
-            refresh_token: refresh_token.clone(),
-            name: session.name.clone(),
-            uuid: session.uuid.clone(),
-        })
-        .await
-        .is_ok();
+    match save_session(&session).await {
+        Ok(()) => {
+            session.remembered = true;
+            session.remember_error = None;
+        }
+        Err(error) => {
+            session.remembered = false;
+            session.remember_error = Some(error);
+        }
     }
     let result = info(&session);
     s.pending = None;
     s.session = Some(session);
     Ok(result)
+}
+async fn save_session(session: &Session) -> ResultT<()> {
+    let refresh_token = session
+        .refresh_token
+        .as_ref()
+        .filter(|token| !token.is_empty())
+        .ok_or("微软未返回可用于恢复登录的刷新令牌，请重新登录并检查授权")?;
+    credentials::save(credentials::StoredAccount {
+        client_id: session.client_id.clone(),
+        refresh_token: refresh_token.clone(),
+        name: session.name.clone(),
+        uuid: session.uuid.clone(),
+    })
+    .await
+}
+#[tauri::command]
+pub async fn remember_microsoft_account() -> ResultT<AccountInfo> {
+    let mut s = state().lock().await;
+    let session = s.session.as_mut().ok_or("请先登录微软账户")?;
+    match save_session(session).await {
+        Ok(()) => {
+            session.remembered = true;
+            session.remember_error = None;
+        }
+        Err(error) => {
+            session.remembered = false;
+            session.remember_error = Some(error);
+        }
+    }
+    Ok(info(session))
 }
 #[tauri::command]
 pub async fn open_microsoft_login() -> ResultT<()> {
@@ -596,7 +631,7 @@ pub async fn cancel_microsoft_login() {
 #[tauri::command]
 pub async fn logout_microsoft() -> ResultT<()> {
     let mut s = state().lock().await;
-    let removal = credentials::clear().await;
+    let removal = credentials::clear(s.session.as_ref().map(|session| session.uuid.clone())).await;
     s.generation += 1;
     s.pending = None;
     s.session = None;
@@ -673,6 +708,7 @@ pub async fn restore_microsoft_account() -> ResultT<Option<AccountInfo>> {
             xuid: String::new(),
             generation,
             remembered: true,
+            remember_error: None,
         });
         generation
     };
@@ -723,6 +759,7 @@ async fn session() -> ResultT<Session> {
         .as_str()
         .filter(|value| !value.is_empty());
     let mut remembered = original.remembered;
+    let mut remember_error = original.remember_error.clone();
     if let Some(token) = rotated {
         let mut s = state().lock().await;
         let current = s
@@ -732,16 +769,26 @@ async fn session() -> ResultT<Session> {
             .ok_or("账户已退出或切换，请重新登录")?;
         // Save the rotated Microsoft token before contacting Xbox/Minecraft so a later
         // service failure cannot discard a newly issued refresh token.
-        remembered = credentials::save(credentials::StoredAccount {
+        match credentials::save(credentials::StoredAccount {
             client_id: original.client_id.clone(),
             refresh_token: token.to_string(),
             name: original.name.clone(),
             uuid: original.uuid.clone(),
         })
         .await
-        .is_ok();
+        {
+            Ok(()) => {
+                remembered = true;
+                remember_error = None;
+            }
+            Err(error) => {
+                remembered = false;
+                remember_error = Some(error);
+            }
+        }
         current.refresh_token = Some(token.to_string());
         current.remembered = remembered;
+        current.remember_error = remember_error.clone();
     }
     let (access, expires, name, uuid, xuid) = exchange(&client, ms).await?;
     if uuid != original.uuid {
@@ -757,6 +804,7 @@ async fn session() -> ResultT<Session> {
         uuid,
         xuid,
         remembered,
+        remember_error,
         ..original.clone()
     };
     let mut s = state().lock().await;
@@ -1007,6 +1055,24 @@ mod tests {
                 .unwrap();
         }
         bytes
+    }
+    #[tokio::test]
+    async fn missing_refresh_token_explains_why_the_session_cannot_be_saved() {
+        let session = Session {
+            client_id: "client".into(),
+            refresh_token: None,
+            access_token: "fake-access-token".into(),
+            expires: Instant::now(),
+            name: "Player".into(),
+            uuid: "uuid".into(),
+            xuid: String::new(),
+            generation: 0,
+            remembered: false,
+            remember_error: None,
+        };
+        let error = save_session(&session).await.unwrap_err();
+        assert!(error.contains("刷新令牌"));
+        assert!(!error.contains("fake-access-token"));
     }
     #[test]
     fn checks_client_id_and_texture_shape() {

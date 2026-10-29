@@ -1372,6 +1372,7 @@ fn main() {
             auth::cancel_microsoft_login,
             auth::logout_microsoft,
             auth::microsoft_account,
+            auth::remember_microsoft_account,
             auth::list_microsoft_accounts,
             auth::switch_microsoft_account,
             auth::restore_microsoft_account,

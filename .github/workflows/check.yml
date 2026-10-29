@@ -33,3 +33,27 @@ jobs:
       - run: npm run check
       - run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  macos-local-credentials:
+    name: macOS local credential persistence
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+      - run: npm ci
+      - run: npm run build
+      - name: Test local credentials across processes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --manifest-path src-tauri/Cargo.toml --locked --no-run --message-format=json > "$RUNNER_TEMP/ccl-build.jsonl"
+          binary=$(jq -r 'select(.profile.test == true and (.target.kind | index("bin"))) | .executable // empty' "$RUNNER_TEMP/ccl-build.jsonl" | tail -n 1)
+          test -n "$binary"
+          "$binary" --exact credentials::tests::macos_local_credentials_survive_process_restart --ignored --nocapture
