@@ -1,14 +1,16 @@
-# CCL
+<img src="src/assets/branding/compass-craft-preview.png" alt="Compass Craft Launcher 图标" width="96">
 
-**CCL 是一个使用 Tauri 2 构建的跨平台 Minecraft: Java Edition 启动器。** 从安装游戏、管理模组到与朋友联机，CCL 希望让这些事情在同一个简洁的界面里完成。
+# Compass Craft Launcher (CCL)
+
+**Compass Craft Launcher（CCL）是一个使用 Tauri 2 构建的跨平台 Minecraft: Java Edition 启动器。** 从安装游戏、管理模组到与朋友联机，CCL 希望让这些事情在同一个简洁的界面里完成。
 
 [下载最新版本](https://github.com/Zennho/ccl/releases/latest) · [报告问题](https://github.com/Zennho/ccl/issues) · [服务器目录](https://github.com/Zennho/ccl-server-catalog) · [MIT 许可证](LICENSE)
 
-CCL is an independent, open-source Minecraft: Java Edition launcher for Windows, Linux and macOS. It is not affiliated with Mojang or Microsoft.
+Compass Craft Launcher (CCL) is an independent, open-source Minecraft: Java Edition launcher for Windows, Linux and macOS. It is not affiliated with Mojang or Microsoft.
 
 ![CCL 启动主页，显示横幅和当前游戏版本](docs/screenshots/home.webp)
 
-*启动主页，截图中的账户和游戏版本为示例数据。*
+*界面截图中的账户、游戏版本及内容列表为示例数据。*
 
 ## 下载与安装
 
