@@ -83,6 +83,8 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 
 ## 从源码开发
 
+此分支正在迁移到 React：应用外壳、主页与版本列表已接入 React，其余页面与弹窗暂由兼容层渲染，交互状态和部分 DOM 更新仍沿用原实现。迁移尚未完成，合并前仍需逐页替换兼容层并验证桌面端行为。
+
 ### 环境准备
 
 安装 Node.js 22、Rust，以及 [Tauri 2 对应平台的系统依赖](https://v2.tauri.app/start/prerequisites/)。Linux 构建需要 WebKitGTK、D-Bus 等开发包，Windows 需要 Microsoft C++ 构建工具和 WebView2，macOS 需要 Xcode 命令行工具；以 Tauri 文档为准。

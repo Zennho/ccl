@@ -9,7 +9,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
 function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings, rememberAccount, listJava} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
-  const w = dom.window;
+  const w = dom.window;require('./react-renderer-helper.cjs')(w);
   const calls = [];
   if(database) w.indexedDB=database;
   w.localStorage.setItem('ccl-settings', JSON.stringify({accountMode:preference,accountKnown:known,selected:installed.id,gameDir:'/game',...savedSettings}));

@@ -7,7 +7,7 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
 function boot(check, settings={}, version=installed) {
   const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
-  const w=dom.window,calls=[],intervals=[];
+  const w=dom.window,calls=[],intervals=[];require('./react-renderer-helper.cjs')(w);
   w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:version.id,gameDir:'/game',...settings}));
   w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};
   w.openDialog=async()=>null;w.saveDialog=async()=>null;

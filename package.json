@@ -14,7 +14,10 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-dialog": "^2.8.3",
+    "html-react-parser": "^6.1.9",
     "lucide": "^0.468.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "skinview3d": "^3.4.2"
   },
   "devDependencies": {

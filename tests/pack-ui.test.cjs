@@ -6,7 +6,7 @@ const {JSDOM}=require('jsdom');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,10));
 function boot(options={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
- const w=dom.window,calls=[],pending=[];
+ const w=dom.window,calls=[],pending=[];require('./react-renderer-helper.cjs')(w);
  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:'1.20.1',gameDir:'/game'}));
  w.setInterval=()=>0;w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};w.openDialog=async()=>null;w.saveDialog=async()=>null;
  w.invoke=(name,args={})=>{calls.push({name,args});

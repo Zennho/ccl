@@ -3,7 +3,7 @@ const path=require('path');
 const fs=require('fs');
 const assert=require('assert');
 const dom=new JSDOM('<!doctype html><html><body><div id="app"></div></body></html>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
-const w=dom.window;
+const w=dom.window;require('./react-renderer-helper.cjs')(w);
 const { indexedDB }=require('fake-indexeddb');w.indexedDB=indexedDB;
 w.IntersectionObserver=class { constructor(callback){this.callback=callback;} observe(element){assert(element.classList.contains('thumbnail'),'observe visible thumbnail container');queueMicrotask(()=>{if(element.isConnected)this.callback([{target:element,isIntersecting:true}]);});} unobserve(){} disconnect(){} };
 let blobId=0;w.URL.createObjectURL=()=>`blob:ccl-test-${++blobId}`;w.URL.revokeObjectURL=()=>{};

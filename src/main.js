@@ -6,6 +6,8 @@ import './launch-screen.css';
 import './management.css';
 import './update.css';
 import { createJobManager } from './job-manager.js';
+import { createRenderer } from './react/renderer.js';
+import { HomePage, VersionsPage } from './react/pages.js';
 import { version as appVersion } from '../package.json';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { createIcons, Blocks, Box, ChevronDown, ChevronRight, CircleHelp, Compass, Download, FolderOpen, Gamepad2, Globe2, HardDrive, Layers3, LayoutGrid, Monitor, MoreHorizontal, Play, RefreshCw, Settings2, ShieldCheck, UserRound, X, Zap, Minus, Square, ListChecks } from 'lucide';
@@ -21,6 +23,7 @@ const appearanceDefaults = { bannerOpacity: 0, bannerFrost: 0, bannerBlur: 0, ba
 const clampAppearance = (value, fallback, max = 100) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(max, Number(value))) : fallback;
 const theme = { bannerOpacity: clampAppearance(saved.theme?.bannerOpacity, 0), bannerFrost: clampAppearance(saved.theme?.bannerFrost, 0), bannerBlur: clampAppearance(saved.theme?.bannerBlur, 0, 30), backgroundOpacity: clampAppearance(saved.theme?.backgroundOpacity, 35), backgroundFrost: clampAppearance(saved.theme?.backgroundFrost, 42), backgroundBlur: clampAppearance(saved.theme?.backgroundBlur, 8, 30), banner: null, background: null };
 const app = document.querySelector('#app');
+const renderer = createRenderer(app);
 const instanceColors=['#76956d','#6d91a3','#a68072','#9b83a9','#c29d63','#7f8a78'];
 let instanceThemes={};
 try{const value=JSON.parse(localStorage.getItem('ccl-instance-themes')||'{}');if(value&&typeof value==='object'&&!Array.isArray(value))instanceThemes=value;}catch{}
@@ -295,13 +298,7 @@ function shell() {
   <nav class="nav"><button data-page="home" class="${state.page === 'home' ? 'active' : ''}">${icon('layout-grid')}<span>启动游戏</span></button><button data-page="versions" class="${state.page === 'versions' ? 'active' : ''}">${icon('layers-3')}<span>版本管理</span></button><button data-page="content" class="${state.page === 'content' ? 'active' : ''}">${icon('blocks')}<span>模组与资源</span></button><button data-page="multiplayer" class="${state.page === 'multiplayer' ? 'active' : ''}">${icon('globe-2')}<span>多人联机</span></button><button data-page="downloads" class="${state.page === 'downloads' ? 'active' : ''}">${icon('download')}<span>下载任务</span><b class="job-badge">${activeJobCount() || ''}</b></button><button data-page="java" class="${state.page === 'java' ? 'active' : ''}">${icon('monitor')}<span>Java 管理</span></button><button data-page="account" class="${state.page === 'account' ? 'active' : ''}">${icon('user-round')}<span>账户与外观</span></button><button data-page="settings" class="${state.page === 'settings' ? 'active' : ''}">${icon('settings-2')}<span>启动设置</span></button></nav>
   <div class="side-bottom"><div class="side-footer"><span class="status-dot"></span> ${state.online ? '版本服务已连接' : '本地工作区'} <span>v${esc(appVersion)}</span></div></div></aside>
   <main class="main"><header class="topbar"><div class="breadcrumbs"><strong>${{home:'启动游戏',versions:'版本管理',content:'模组与资源',downloads:'下载任务',multiplayer:'多人联机',java:'Java 管理',account:'账户与外观',settings:'启动设置'}[state.page]}</strong></div><div class="top-right"><div id="update-slot" aria-live="polite"></div><div class="avatar">${esc(playerName().slice(0,1).toUpperCase())}</div><div class="profile"><strong>${esc(playerName())}</strong><small>${playerStatus()}</small></div></div></header>
-  <div class="content">${state.page === 'home' ? home() : state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage()}</div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
-}
-function home() {
- const v = selected();
- return `<section class="hero home-hero"><div class="hero-art"><div class="sun"></div><div class="cloud cloud-a"></div><div class="cloud cloud-b"></div><div class="mountain mountain-back"></div><div class="mountain mountain-mid"></div><div class="mountain mountain-front"></div><div class="ground"></div><div class="tree tree-a"><i></i></div><div class="tree tree-b"><i></i></div><div class="tree tree-c"><i></i></div><div class="art-grid"></div><div class="hero-custom"></div></div><div class="hero-shade"></div><div class="hero-content"><div class="hero-kicker">MINECRAFT · JAVA 版</div><h1>准备好，<em>出发。</em></h1><p>你的世界，在这里继续。</p></div></section>
- <div class="section-title home-title"><h3>开始游戏</h3><button class="row-button log-link" data-action="open-log" ${!v?.installed ? 'disabled' : ''}>启动日志</button></div>
- <section class="launch-panel"><div class="launch-version">${versionIcon(v,'version-cube')}<div><small>当前版本</small><strong>${v ? esc(v.name || v.id) : '选择一个版本'}</strong><span>${v?.installed ? `${esc(v.kind)} · 已安装` : '先在版本管理中安装游戏'}</span>${v?.installed && getInstanceTheme(state.gameDir,v.id).description?`<span class="instance-description-home">${esc(getInstanceTheme(state.gameDir,v.id).description)}</span>`:''}</div></div><button class="change-version" data-page="versions">切换版本 ${icon('chevron-down', 15)}</button><button class="play-button" data-action="launch" ${!v?.installed ? 'disabled' : ''}>${icon('play', 18)} 启动游戏</button></section>`;
+  <div class="content"></div></main><div id="modal-root"></div><div id="toast-root"></div><div class="resize-edge resize-n" data-resize="North"></div><div class="resize-edge resize-s" data-resize="South"></div><div class="resize-edge resize-e" data-resize="East"></div><div class="resize-edge resize-w" data-resize="West"></div><div class="resize-edge resize-nw" data-resize="NorthWest"></div><div class="resize-edge resize-ne" data-resize="NorthEast"></div><div class="resize-edge resize-sw" data-resize="SouthWest"></div><div class="resize-edge resize-se" data-resize="SouthEast"></div></div>`;
 }
 function multiplayerPage() {
  return `<div class="server-tabs" role="tablist" aria-label="联机功能"><button type="button" data-lan-view="room" role="tab" aria-selected="${state.lanView==='room'}">IPv6 房间</button><button type="button" data-lan-view="servers" role="tab" aria-selected="${state.lanView==='servers'}">公开服务器</button></div>${state.lanView==='room' ? lanRoomPage() : publicServersPage()}`;
@@ -715,16 +712,21 @@ function renderOverlay() {
   current.querySelector('.launch-screen-copy').innerHTML=next.querySelector('.launch-screen-copy').innerHTML;
  } else if(state.instanceSettingsView && root.querySelector('.instance-settings-dialog') && !state.launchView && !state.crashDialog) {
   // Keep unsaved edits intact when background activity refreshes the overlay.
- } else root.innerHTML=state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.instanceSettingsView ? instanceSettingsDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.instanceView ? instanceDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '';
+ } else renderer.overlay(state.launchView ? launchScreen() : state.crashDialog ? crashDialog() : state.instanceSettingsView ? instanceSettingsDialog() : state.themeView ? themeDialog() : state.profileView ? profileDialog() : state.manageView ? manageDialog() : state.instanceView ? instanceDialog() : state.installDraft ? installDialog() : state.modDraft ? modVersionDialog() : state.archiveDraft ? archiveDialog() : '');
  syncMemoryControls();
  if(state.profileView)paintProfileImages(state.profileView);
  hydrateIcons();
+}
+function renderPage() {
+ if(state.page==='home'){const v=selected();renderer.page('',HomePage,{version:v,versionIcon:versionIcon(v,'version-cube'),description:v?.installed?getInstanceTheme(state.gameDir,v.id).description:''});return;}
+ if(state.page==='versions' && !state.versionDelete){renderer.page('',VersionsPage,{versions:state.versions,query:state.versionQuery,selected:state.selected,loading:state.loading,versionIcon});return;}
+ renderer.page(state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage());
 }
 function render() {
  if(composingSearch && renderedPage===state.page) { pendingCompositionRender=true;return; }
  if(composingSearch && renderedPage!==state.page) { composingSearch=false;pendingCompositionRender=false; }
  const first = !app.querySelector('.app-shell');
- if (first) app.innerHTML = shell();
+ if (first) { renderer.mount(shell()); renderPage(); }
  else {
   const content = app.querySelector('.content');
   const same = renderedPage === state.page;
@@ -732,7 +734,7 @@ function render() {
   const values = same ? [...content.querySelectorAll('form input, form select')].filter(x => x.name).map(x => ({name:x.name, value:x.value, checked:x.checked, type:x.type})) : [];
   const active = same && content.contains(document.activeElement) ? document.activeElement : null;
   const focus = active ? { name:active.name, id:active.id, start:active.selectionStart, end:active.selectionEnd } : null;
-  content.innerHTML = state.page === 'home' ? home() : state.page === 'versions' ? versionsPage() : state.page === 'java' ? javaPage() : state.page === 'content' ? contentPage() : state.page === 'downloads' ? downloadsPage() : state.page === 'account' ? accountPage() : state.page === 'multiplayer' ? multiplayerPage() : settingsPage();
+  renderPage();
   for (const saved of values) { const el = [...content.querySelectorAll('form input, form select')].find(x => x.name === saved.name && x.type === saved.type); if (el) { el.value = saved.value; if (el.type === 'checkbox' || el.type === 'radio') el.checked = saved.checked; } }
   if (focus) { const el = [...content.querySelectorAll('input, select')].find(x => focus.id ? x.id === focus.id : x.name === focus.name); if (el) { el.focus({preventScroll:true}); if (focus.start != null && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(focus.start, focus.end); } catch {} } } }
   if(same && main){main.scrollTop=scrollTop;main.scrollLeft=scrollLeft;docScroll.scrollTop=docTop;docScroll.scrollLeft=docLeft;}
