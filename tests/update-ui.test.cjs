@@ -27,7 +27,7 @@ test('checks automatically, shows the update and opens the fixed release command
     await tick();await tick();
     assert.equal(app.calls.filter(c=>c.name==='check_launcher_update').length,1);
     assert.match(app.w.document.querySelector('.update-pill').textContent,/0\.1\.12/);
-    assert.equal(app.intervals.length,1);assert.equal(app.intervals[0].ms,6*60*60*1000);
+    assert.equal(app.intervals.filter(i=>i.ms===6*60*60*1000).length,1);
     app.click('[data-action="open-update"]');await tick();
     assert.ok(app.calls.some(c=>c.name==='open_launcher_releases'));
     app.click('[data-action="dismiss-update"]');assert.ok(!app.w.document.querySelector('.update-pill'));
@@ -60,7 +60,7 @@ test('background checks preserve settings input and surface a later release',asy
     complete();await tick();
     assert.strictEqual(app.w.document.querySelector('#username'),input);
     assert.equal(input.value,'Unsubmitted');assert.strictEqual(app.w.document.activeElement,input);
-    app.click('[data-action="dismiss-update"]');version='0.1.13';app.intervals[0].fn();await tick();complete();await tick();
+    app.click('[data-action="dismiss-update"]');version='0.1.13';app.intervals.find(i=>i.ms===6*60*60*1000).fn();await tick();complete();await tick();
     assert.match(app.w.document.querySelector('.update-pill').textContent,/0\.1\.13/);
   } finally {app.close();}
 });

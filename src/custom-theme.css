@@ -1,3 +1,7 @@
+/* Default banners follow local time; custom images take precedence. */
+:root,:root[data-banner-period="day"]{--ccl-default-banner:url('./assets/banners/day.png')}
+:root[data-banner-period="sunset"]{--ccl-default-banner:url('./assets/banners/sunset.png')}
+:root[data-banner-period="night"]{--ccl-default-banner:url('./assets/banners/night.png')}
 /* Custom images sit below the interface; text and controls remain fully opaque. */
 .app-shell{position:relative;isolation:isolate}
 .has-custom-background .app-shell::before,.has-custom-background .app-shell::after{content:"";position:fixed;inset:0;pointer-events:none}
@@ -7,8 +11,8 @@
 .has-custom-background .window-bar{background:rgba(235,227,213,.56);-webkit-backdrop-filter:none;backdrop-filter:none}
 .has-custom-background .launch-panel,.has-custom-background .info-card,.has-custom-background .settings-section,.has-custom-background .java-download-card,.has-custom-background .content-search,.has-custom-background .job-card{background:rgba(255,253,247,.88)}
 .hero-custom{position:absolute;inset:0;background-image:var(--ccl-banner-image);background-position:center;background-size:cover;opacity:var(--ccl-banner-opacity)}
-.has-custom-banner .hero-art{background:transparent}
-.has-custom-banner .hero-art> :not(.hero-custom),.has-custom-banner .hero-art::after,.has-custom-banner .home-hero .hero-shade,.has-custom-banner .home-hero .hero-content{display:none}
+.home-hero .hero-art{background:transparent}
+.home-hero .hero-art> :not(.hero-custom),.home-hero .hero-art::after,.home-hero .hero-shade,.home-hero .hero-content{display:none}
 .theme-settings{margin-bottom:15px}
 .theme-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-left:59px}
 .theme-card{border:1px solid #e2dbcd;background:#f8f5ed;border-radius:4px;padding:18px}

@@ -21,13 +21,20 @@ const appearanceDefaults = { bannerOpacity: 0, backgroundOpacity: 35, background
 const clampAppearance = (value, fallback, max = 100) => Number.isFinite(Number(value)) ? Math.max(0, Math.min(max, Number(value))) : fallback;
 const theme = { bannerOpacity: clampAppearance(saved.theme?.bannerOpacity, 0), backgroundOpacity: clampAppearance(saved.theme?.backgroundOpacity, 35), backgroundFrost: clampAppearance(saved.theme?.backgroundFrost, 42), backgroundBlur: clampAppearance(saved.theme?.backgroundBlur, 8, 30), banner: null, background: null };
 const app = document.querySelector('#app');
+function bannerPeriod(date = new Date()) {
+ const hour=date.getHours();
+ return hour>=6 && hour<17 ? 'day' : hour>=17 && hour<19 ? 'sunset' : 'night';
+}
+function updateDefaultBanner() {
+ document.documentElement.dataset.bannerPeriod=bannerPeriod();
+}
 function applyTheme() {
  const root=document.documentElement;
  root.style.setProperty('--ccl-banner-opacity', String(1-theme.bannerOpacity/100));
  root.style.setProperty('--ccl-background-opacity', String(1-theme.backgroundOpacity/100));
  root.style.setProperty('--ccl-background-frost', String(theme.backgroundFrost/100));
  root.style.setProperty('--ccl-background-blur', `${theme.backgroundBlur}px`);
- root.style.setProperty('--ccl-banner-image', theme.banner ? `url("${theme.banner}")` : 'none');
+ root.style.setProperty('--ccl-banner-image', theme.banner ? `url("${theme.banner}")` : 'var(--ccl-default-banner)');
  root.style.setProperty('--ccl-background-image', theme.background ? `url("${theme.background}")` : 'none');
  root.classList.toggle('has-custom-background', !!theme.background);
  root.classList.toggle('has-custom-banner', !!theme.banner);
@@ -599,6 +606,9 @@ function restoreAccount({notify=false}={}) {
  return task;
 }
 async function init() {
+ updateDefaultBanner();
+ window.setInterval(updateDefaultBanner,60*1000);
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)updateDefaultBanner();});
  restoreJobs();render();
  restoreThemeImages();
  if (!isTauri()) { state.notice = '请在 Tauri 桌面应用中使用启动器。'; state.noticeKind = 'error'; render(); return; }
