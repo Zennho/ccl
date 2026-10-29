@@ -30,8 +30,9 @@ export async function createAppearancePreview(canvas, skin, cape, model) {
   try {
     if (!window.WebGLRenderingContext) return await fallbackPreview(canvas,skin,cape,model);
     viewer = new SkinViewer({ canvas, width: 280, height: 350 });
-    viewer.autoRotate = true;
-    viewer.autoRotateSpeed = 0.45;
+    viewer.autoRotate = false;
+    viewer.resetCameraPose();
+    viewer.controls.enableRotate = true;
     viewer.controls.enableZoom = false;
     await viewer.loadSkin(skin, { model: model === 'slim' ? 'slim' : 'default' });
     if (cape) await viewer.loadCape(cape);

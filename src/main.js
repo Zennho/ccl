@@ -338,11 +338,18 @@ function refreshPreview() {
  if(!skin) return;
  import('./appearance-preview.js').then(m=>m.createAppearancePreview(canvas,skin,cape,state.skinModel)).then(next=>{if(generation!==previewGeneration) next.dispose(); else { viewer=next; if(next.is2d) { const caption=app.querySelector('.preview-caption'); if(caption) caption.textContent=`2D 预览 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}`; } }}).catch(()=>{if(generation===previewGeneration) { const el=app.querySelector('.preview-fallback'); if(el) el.hidden=false; }});
 }
-async function refreshAppearance() {
- const accountId=state.account?.uuid; if(!accountId) return;
- try { const result=await invoke('get_appearance'); if(state.account?.uuid!==accountId) return; state.appearance=result; state.skinModel=result.model==='slim'?'slim':'classic'; state.previewCapeId=result.capes.find(c=>c.active)?.id || ''; }
- catch(e) { if(state.account?.uuid!==accountId) return; state.appearance=null; flash(`无法获取账户外观：${e}`,'error'); }
- if(state.page==='account') render();
+let appearanceRequest=null;
+function refreshAppearance({reuse=false}={}) {
+ const account=state.account; if(!account?.uuid) return Promise.resolve();
+ if(reuse && appearanceRequest?.account===account) return appearanceRequest.promise;
+ const request={account};appearanceRequest=request;
+ request.promise=(async()=>{
+  try { const result=await invoke('get_appearance'); if(state.account!==account || appearanceRequest!==request) return; state.appearance=result; state.skinModel=result.model==='slim'?'slim':'classic'; state.previewCapeId=result.capes.find(c=>c.active)?.id || ''; }
+  catch(e) { if(state.account!==account || appearanceRequest!==request) return; state.appearance=null; flash(`无法获取账户外观：${e}`,'error'); }
+  finally { if(appearanceRequest===request) appearanceRequest=null; }
+  if(state.page==='account') render();
+ })();
+ return request.promise;
 }
 async function refreshInstalled(dir) {
  if (dir !== state.gameDir) return;
@@ -448,7 +455,7 @@ app.addEventListener('click', async event => {
  app.querySelectorAll('.version-menu[open]').forEach(menu=>{ if(!menuSummary || menuSummary.parentElement!==menu) menu.open=false; });
  const windowControl=event.target.closest('[data-window]');
  if (windowControl) { if (isTauri()) { try { const win=getCurrentWindow(); if (windowControl.dataset.window==='minimize') await win.minimize(); else if(windowControl.dataset.window==='maximize') await win.toggleMaximize(); else if(windowControl.dataset.window==='close') await win.close(); } catch(e) { flash(`窗口操作失败：${e}`,'error'); } } return; }
- const page = event.target.closest('[data-page]'); if (page) { state.page = page.dataset.page; render(); if (state.page === 'java') await refreshJava(); if (state.page === 'multiplayer' && state.lanView==='room') await refreshLanAddresses(); if (state.page === 'multiplayer' && state.lanView==='servers' && !state.serverCatalog) await refreshPublicServers(); if (state.page === 'content') { if(!state.contentTarget || !state.versions.some(v=>v.installed && v.id===state.contentTarget)) {state.contentTarget=state.selected || '';state.selectedMods.clear();state.modUpdates=null;modEpoch++;state.contentPage=0;state.contentLoaded=false;} await refreshMods();if(!state.contentLoaded) await searchContent(); } return; }
+ const page = event.target.closest('[data-page]'); if (page) { state.page = page.dataset.page; render(); if (state.page === 'account' && state.account && !state.appearance) void refreshAppearance({reuse:true}); if (state.page === 'java') await refreshJava(); if (state.page === 'multiplayer' && state.lanView==='room') await refreshLanAddresses(); if (state.page === 'multiplayer' && state.lanView==='servers' && !state.serverCatalog) await refreshPublicServers(); if (state.page === 'content') { if(!state.contentTarget || !state.versions.some(v=>v.installed && v.id===state.contentTarget)) {state.contentTarget=state.selected || '';state.selectedMods.clear();state.modUpdates=null;modEpoch++;state.contentPage=0;state.contentLoaded=false;} await refreshMods();if(!state.contentLoaded) await searchContent(); } return; }
  const openFolder = event.target.closest('[data-open-version-folder]'); if (openFolder) { try { await invoke('open_version_folder',{gameDir:state.gameDir,version:openFolder.dataset.openVersionFolder}); } catch(e) { flash(String(e),'error'); } return; }
  const deleteVersion=event.target.closest('[data-delete-version]');if(deleteVersion) {const version=state.versions.find(v=>v.id===deleteVersion.dataset.deleteVersion&&v.installed);if(version){state.versionDelete={id:version.id,name:version.name||version.id,isolated:!!version.isolated,gameDir:state.gameDir};render();}return;}
  const exportButton=event.target.closest('[data-export-game]'); if(exportButton) { state.archiveDraft={kind:'export',version:exportButton.dataset.exportGame,gameDir:state.gameDir}; renderOverlay(); return; }
@@ -592,7 +599,7 @@ function restoreAccount({notify=false}={}) {
    if(account && !state.loginAttempt) {
     state.account=account;state.accountName=account.name;state.accountKnown=true;state.accountMode=state.accountPreference==='offline'?'offline':'microsoft';persist();
     if(account.remembered===false)flash('账户已恢复，但无法保存新的登录状态；请检查系统凭据库。','error');
-    if(state.page==='account')void refreshAppearance();
+    void refreshAppearance({reuse:true});
     return account;
    }
    if(!account && state.accountKnown) state.accountRestoreError='未找到已保存的账户，请重新登录或使用离线账户。';

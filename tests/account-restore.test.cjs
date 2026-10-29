@@ -6,7 +6,7 @@ const { JSDOM } = require('jsdom');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
-function boot({preference='microsoft', known=false, restore, logout, launch} = {}) {
+function boot({preference='microsoft', known=false, restore, logout, launch, appearance} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
   const w = dom.window;
   const calls = [];
@@ -21,7 +21,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch} = {
     if(name==='restore_microsoft_account')return restore ? restore() : null;
     if(name==='logout_microsoft')return logout ? logout() : undefined;
     if(name==='launch_game')return launch ? launch(args) : undefined;
-    if(name==='get_appearance')return {skin:null,model:'classic',capes:[]};
+    if(name==='get_appearance')return appearance ? appearance() : {skin:null,model:'classic',capes:[]};
   };
   w.appVersion = require('../package.json').version;
   w.eval(fs.readFileSync(path.join(__dirname,'../src/job-manager.js'),'utf8').replace('export function createJobManager','function createJobManager'));
@@ -30,6 +30,33 @@ function boot({preference='microsoft', known=false, restore, logout, launch} = {
   const click = selector => { const el=w.document.querySelector(selector);assert.ok(el,selector);el.click(); };
   return {w, calls, click, close:()=>w.close()};
 }
+
+test('restores account skin and cape even when login completes on the home page', async () => {
+  const app=boot({known:true,restore:()=>Promise.resolve({name:'RealPlayer',uuid:'abc'}),appearance:()=>Promise.resolve({skin:'data:image/png;base64,skin',model:'slim',capes:[{id:'cape',name:'Cape',active:true,texture:'data:image/png;base64,cape'}]})});
+  try {
+    await tick();await tick();
+    assert.equal(app.calls.filter(c=>c.name==='get_appearance').length,1);
+    app.click('[data-page="account"]');await tick();
+    assert.equal(app.calls.filter(c=>c.name==='get_appearance').length,1);
+    assert.ok(!app.w.document.querySelector('#skin-preview').hidden);
+    assert.equal(app.w.document.querySelector('#skin-model').value,'slim');
+    assert.match(app.w.document.querySelector('.skin-source').textContent,/当前账户皮肤/);
+    assert.match(app.w.document.querySelector('.preview-caption').textContent,/账户披风预览/);
+  } finally {app.close();}
+});
+
+test('reuses an appearance request while navigating and retries after failure', async () => {
+  let resolveAppearance, attempts=0;
+  const app=boot({known:true,restore:()=>Promise.resolve({name:'RealPlayer',uuid:'abc'}),appearance:()=>++attempts===1?new Promise((resolve,reject)=>{resolveAppearance=reject;}):Promise.resolve({skin:'data:image/png;base64,skin',model:'classic',capes:[]})});
+  try {
+    await tick();app.click('[data-page="account"]');app.click('[data-page="home"]');app.click('[data-page="account"]');
+    assert.equal(attempts,1,'navigation reuses the pending request');
+    resolveAppearance('网络不可用');await tick();
+    app.click('[data-page="home"]');app.click('[data-page="account"]');await tick();
+    assert.equal(attempts,2,'returning to the account page retries');
+    assert.ok(!app.w.document.querySelector('#skin-preview').hidden);
+  } finally {app.close();}
+});
 
 test('online launch shares the background restore and waits before starting', async () => {
   let complete;
