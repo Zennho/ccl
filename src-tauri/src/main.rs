@@ -8,6 +8,7 @@ mod jobs;
 mod lan;
 mod lan_core;
 mod loaders;
+mod memory;
 mod server_catalog;
 mod source_probe;
 mod thumbnails;
@@ -35,6 +36,7 @@ const MANIFEST: &str = "https://piston-meta.mojang.com/mc/game/version_manifest_
 type ResultT<T> = Result<T, String>;
 
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Version {
     id: String,
     name: String,
@@ -42,6 +44,7 @@ struct Version {
     released: String,
     installed: bool,
     isolated: bool,
+    has_instance_data: bool,
 }
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -59,6 +62,8 @@ struct LaunchOptions {
     java_path: String,
     game_dir: String,
     memory: u32,
+    #[serde(default)]
+    memory_mode: String,
     #[serde(default)]
     optimize: bool,
     #[serde(default)]
@@ -479,12 +484,16 @@ async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     .join(format!("{id}.json"))
                     .exists(),
                 isolated: false,
+                has_instance_data: false,
             })
         })
         .collect();
     let extra = installed_versions(game_dir)?;
     for v in extra {
-        if !result.iter().any(|known| known.id == v.id) {
+        if let Some(known) = result.iter_mut().find(|known| known.id == v.id) {
+            known.isolated = v.isolated;
+            known.has_instance_data = v.has_instance_data;
+        } else {
             result.insert(0, v);
         }
     }
@@ -523,13 +532,22 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     }
                 };
                 let name = meta["cclPackName"].as_str().unwrap_or(&id).to_string();
+                let game_root = entry
+                    .path()
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .unwrap_or(Path::new("."))
+                    .to_path_buf();
+                let isolated = loaders::is_isolated(&game_root, &id, &meta);
+                let has_instance_data = game_root.join("instances").join(&id).is_dir();
                 versions.push(Version {
                     id,
                     name,
                     kind: kind.into(),
                     released: String::new(),
                     installed: true,
-                    isolated: meta["cclInstance"].as_bool() == Some(true),
+                    isolated,
+                    has_instance_data,
                 });
             }
         }
@@ -883,9 +901,6 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     {
         return Err("玩家名须为 1–16 位英文字母、数字或下划线".into());
     }
-    if !(512..=32768).contains(&options.memory) {
-        return Err("内存须在 512–32768 MB 之间".into());
-    }
     let online = if options.account_mode == "microsoft" {
         Some(auth::launch_identity().await?)
     } else if options.account_mode.is_empty() || options.account_mode == "offline" {
@@ -993,13 +1008,14 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
         ),
         ("clientid", "0".into()),
     ];
+    let memory_mb = memory::launch_memory(&options.memory_mode, options.memory)?;
     let mut cmd = Command::new(if options.java_path.trim().is_empty() {
         "java"
     } else {
         &options.java_path
     });
     cmd.current_dir(&runtime_dir)
-        .arg(format!("-Xmx{}M", options.memory));
+        .arg(format!("-Xmx{memory_mb}M"));
     if options.optimize {
         cmd.arg("-XX:+UseG1GC");
     }
@@ -1046,10 +1062,16 @@ async fn launch_game(app: tauri::AppHandle, options: LaunchOptions) -> ResultT<S
     use std::io::Write;
     writeln!(
         log,
-        "CCL {} | 游戏版本 {} | 启动时间 {}",
+        "CCL {} | 游戏版本 {} | 启动时间 {} | CCL 内存参数 -Xmx{}M ({})；自定义 JVM 参数可能覆盖",
         env!("CARGO_PKG_VERSION"),
         options.version,
-        stamp
+        stamp,
+        memory_mb,
+        if options.memory_mode == "auto" {
+            "自动"
+        } else {
+            "手动"
+        }
     )
     .map_err(|e| e.to_string())?;
     cmd.stdout(log.try_clone().map_err(|e| e.to_string())?)
@@ -1163,12 +1185,14 @@ fn main() {
             jobs::cancel_job,
             jobs::end_job,
             version_manager::delete_version,
+            version_manager::set_version_isolation,
             default_game_dir,
             configure_proxy,
             list_versions,
             installed_versions,
             install_version,
             launch_game,
+            memory::memory_info,
             open_game_log,
             open_version_folder,
             auth::begin_microsoft_login,

@@ -1,6 +1,6 @@
 [package]
 name = "ccl-launcher"
-version = "0.1.14"
+version = "0.1.15"
 edition = "2021"
 
 [features]
@@ -31,6 +31,7 @@ if-addrs = "0.15.0"
 socket2 = "0.6"
 keyring = { version = "3.6.3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 semver = "1"
+sysinfo = { version = "0.33", default-features = false, features = ["system"] }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-util", "time"] }

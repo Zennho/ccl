@@ -21,9 +21,14 @@ static SERIAL: AtomicU64 = AtomicU64::new(0);
 #[serde(rename_all = "camelCase")]
 pub struct LaunchSettings {
     memory: u32,
+    #[serde(default = "manual_memory_mode")]
+    memory_mode: String,
     optimize: bool,
     jvm_args: String,
     game_args: String,
+}
+fn manual_memory_mode() -> String {
+    "manual".into()
 }
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -61,6 +66,7 @@ fn validate_manifest(manifest: &ArchiveManifest) -> ResultT<()> {
     }
     if let Some(settings) = &manifest.launch_settings {
         if !(512..=32768).contains(&settings.memory)
+            || !["manual", "auto"].contains(&settings.memory_mode.as_str())
             || settings.jvm_args.len() > 16_384
             || settings.game_args.len() > 16_384
         {
@@ -589,6 +595,19 @@ pub async fn import_game(
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn old_launch_settings_default_to_manual_memory() {
+        let settings: LaunchSettings = serde_json::from_value(serde_json::json!({
+            "memory": 2048, "optimize": true, "jvmArgs": "", "gameArgs": ""
+        }))
+        .unwrap();
+        assert_eq!(settings.memory_mode, "manual");
+        assert_eq!(
+            serde_json::to_value(settings).unwrap()["memoryMode"],
+            "manual"
+        );
+    }
 
     #[test]
     fn rejects_unsafe_paths_and_unexpected_saves() {

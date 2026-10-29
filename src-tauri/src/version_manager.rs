@@ -2,8 +2,12 @@ use crate::{jobs, loaders, resource_lock, root, version_id, ResultT};
 use std::{
     collections::{HashMap, HashSet},
     fs,
+    io::Write,
     path::{Path, PathBuf},
-    sync::{Mutex, OnceLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Mutex, OnceLock,
+    },
 };
 
 #[derive(Default)]
@@ -77,7 +81,7 @@ fn remove(dir: &Path, version: &str, remove_instance: bool) -> ResultT<()> {
     let _reservation = Reservation(path);
     let versions = dir.join("versions");
     let version_dir = safe_dir(&versions, version)?;
-    let meta = loaders::version_json(dir, version)?;
+    loaders::version_json(dir, version)?;
     for entry in fs::read_dir(&versions)
         .map_err(|e| e.to_string())?
         .flatten()
@@ -94,7 +98,7 @@ fn remove(dir: &Path, version: &str, remove_instance: bool) -> ResultT<()> {
             }
         }
     }
-    let instance = if remove_instance && meta["cclInstance"].as_bool() == Some(true) {
+    let instance = if remove_instance {
         let parent = dir.join("instances");
         if parent.join(version).exists() {
             Some(safe_dir(&parent, version)?)
@@ -109,6 +113,55 @@ fn remove(dir: &Path, version: &str, remove_instance: bool) -> ResultT<()> {
     }
     fs::remove_dir_all(version_dir).map_err(|e| format!("无法删除版本文件：{e}"))?;
     Ok(())
+}
+
+fn change_isolation(dir: &Path, version: &str, isolated: bool) -> ResultT<()> {
+    let path = normalized(dir);
+    let guard = running().lock().map_err(|_| "游戏状态不可用")?;
+    if guard.deleting.contains(&path) || guard.games.contains_key(&(path, version.to_string())) {
+        return Err("该版本正在运行或删除，请先退出游戏并等待操作完成".into());
+    }
+    let version_dir = safe_dir(&dir.join("versions"), version)?;
+    let meta = loaders::version_json(dir, version)?;
+    if !isolated && meta["cclPackName"].is_string() {
+        return Err("整合包必须使用独立游戏目录".into());
+    }
+    let target = version_dir.join("ccl-isolation.json");
+    static SEQUENCE: AtomicU64 = AtomicU64::new(0);
+    let temporary = version_dir.join(format!(
+        ".ccl-isolation-{}-{}.tmp",
+        std::process::id(),
+        SEQUENCE.fetch_add(1, Ordering::Relaxed)
+    ));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|e| format!("无法保存版本隔离设置：{e}"))?;
+    if let Err(error) = file.write_all(if isolated { b"true" } else { b"false" }) {
+        drop(file);
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("无法保存版本隔离设置：{error}"));
+    }
+    drop(file);
+    if let Err(error) = fs::rename(&temporary, &target) {
+        let _ = fs::remove_file(&temporary);
+        return Err(format!("无法保存版本隔离设置：{error}"));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn set_version_isolation(
+    game_dir: String,
+    version: String,
+    isolated: bool,
+) -> ResultT<()> {
+    version_id(&version)?;
+    let dir = root(&game_dir)?;
+    let lock = resource_lock(format!("version:{}:{version}", dir.display()));
+    let _guard = lock.try_lock().map_err(|_| "该版本正在安装，请稍后重试")?;
+    jobs::while_idle(&game_dir, || change_isolation(&dir, &version, isolated))
 }
 #[tauri::command]
 pub async fn delete_version(
@@ -148,6 +201,56 @@ mod tests {
             serde_json::to_vec(&metadata).unwrap(),
         )
         .unwrap();
+    }
+    #[tokio::test]
+    async fn isolation_switch_keeps_data_and_respects_running_games_and_packs() {
+        let dir = fixture();
+        let game = dir.to_string_lossy().to_string();
+        version(&dir, "vanilla", serde_json::json!({"id":"vanilla"}));
+        let metadata = loaders::version_json(&dir, "vanilla").unwrap();
+        assert_eq!(loaders::runtime_dir(&dir, "vanilla", &metadata), dir);
+        fs::create_dir_all(dir.join("saves")).unwrap();
+        fs::write(dir.join("saves/world"), b"shared").unwrap();
+        set_version_isolation(game.clone(), "vanilla".into(), true)
+            .await
+            .unwrap();
+        assert_eq!(
+            loaders::runtime_dir(&dir, "vanilla", &metadata),
+            dir.join("instances/vanilla")
+        );
+        fs::create_dir_all(dir.join("instances/vanilla/saves")).unwrap();
+        fs::write(dir.join("instances/vanilla/saves/world"), b"isolated").unwrap();
+        let running = track_launch(&dir, "vanilla").unwrap();
+        assert!(set_version_isolation(game.clone(), "vanilla".into(), false)
+            .await
+            .is_err());
+        drop(running);
+        jobs::begin_job("isolation-test-job".into(), Some(game.clone())).unwrap();
+        assert!(set_version_isolation(game.clone(), "vanilla".into(), false)
+            .await
+            .is_err());
+        jobs::end_job("isolation-test-job".into());
+        set_version_isolation(game.clone(), "vanilla".into(), false)
+            .await
+            .unwrap();
+        assert_eq!(loaders::runtime_dir(&dir, "vanilla", &metadata), dir);
+        assert_eq!(fs::read(dir.join("saves/world")).unwrap(), b"shared");
+        assert_eq!(
+            fs::read(dir.join("instances/vanilla/saves/world")).unwrap(),
+            b"isolated"
+        );
+        version(
+            &dir,
+            "pack",
+            serde_json::json!({"id":"pack","cclInstance":true,"cclPackName":"Pack"}),
+        );
+        assert!(set_version_isolation(game.clone(), "pack".into(), false)
+            .await
+            .is_err());
+        delete_version(game, "vanilla".into(), true).await.unwrap();
+        assert!(dir.join("saves/world").exists());
+        assert!(!dir.join("instances/vanilla").exists());
+        fs::remove_dir_all(dir).unwrap();
     }
     #[tokio::test]
     async fn protects_shared_data_dependencies_and_running_games() {

@@ -84,8 +84,21 @@ pub fn version_json(dir: &Path, version: &str) -> ResultT<Value> {
     serde_json::from_slice(&fs::read(path).map_err(|_| format!("游戏版本 {version} 尚未安装"))?)
         .map_err(|e| e.to_string())
 }
+pub fn is_isolated(dir: &Path, version: &str, metadata: &Value) -> bool {
+    if metadata["cclPackName"].is_string() {
+        return true;
+    }
+    let setting = dir
+        .join("versions")
+        .join(version)
+        .join("ccl-isolation.json");
+    fs::read(setting)
+        .ok()
+        .and_then(|bytes| serde_json::from_slice::<bool>(&bytes).ok())
+        .unwrap_or(metadata["cclInstance"].as_bool() == Some(true))
+}
 pub fn runtime_dir(dir: &Path, version: &str, metadata: &Value) -> PathBuf {
-    if metadata["cclInstance"].as_bool() == Some(true) {
+    if is_isolated(dir, version, metadata) {
         dir.join("instances").join(version)
     } else {
         dir.to_path_buf()
