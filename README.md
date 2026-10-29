@@ -49,13 +49,17 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 | --- | --- |
 | ![CCL 版本管理界面](docs/screenshots/versions.webp) | ![CCL 游戏安装配置界面](docs/screenshots/install.webp) |
 
-![CCL 模组与整合包浏览界面](docs/screenshots/mods.webp)
+**模组与资源** · 按游戏版本浏览模组、整合包、材质包和光影包，并选择具体版本下载。
+
+![CCL 模组浏览界面](docs/screenshots/mods.webp)
+
+![CCL 光影包浏览界面](docs/screenshots/shader.webp)
 
 **账户与外观** · 预览角色皮肤，管理正版账户的皮肤与披风。
 
 ![CCL 账户与外观界面，显示角色皮肤的三维预览](docs/screenshots/appearance.webp)
 
-*版本管理、安装配置、模组浏览和账户外观截图使用示例数据。*
+*版本管理、安装配置、内容浏览和账户外观截图使用示例数据。*
 
 ## 使用须知
 
