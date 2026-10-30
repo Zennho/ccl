@@ -1,7 +1,7 @@
 import React from 'react';
 
 export interface Diagnosis { title?: unknown; source?: unknown; steps?: unknown }
-export interface Crash { version: string; code?: number | null; diagnosis?: Diagnosis | null }
+export interface Crash { version: string; gameDir: string; logName: string | null; code?: number | null; diagnosis?: Diagnosis | null }
 export interface LaunchView { id: string; version: string; phase: 'authenticating' | 'preparing' | 'waiting' | 'failed'; error?: string; warning?: string; authError?: boolean; crash?: Crash | null }
 
 function DiagnosisContent({ crash }: { crash: Crash }) {

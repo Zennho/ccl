@@ -83,7 +83,7 @@ Windows 安装包尚未进行代码签名；macOS 包使用临时签名，尚未
 
 ## 从源码开发
 
-此分支的页面、弹窗和主窗口已迁移至 React 与 TypeScript，下载队列、账户与外观、资源浏览与管理、游戏导入导出、多人联机、游戏启动、游戏档案及启动配置也纳入严格类型检查，旧 HTML 模板解析兼容层已移除。入口控制器仍使用 JavaScript 和事件委托，迁移尚未完成；合并前仍需类型化并验证桌面端行为。
+前端使用 React 和 TypeScript，页面、弹窗、入口控制器及业务模块均纳入严格类型检查。入口仍通过事件委托协调部分操作；合并前请结合跨平台安装包验证桌面端行为。
 
 ### 环境准备
 
@@ -100,7 +100,7 @@ npm run tauri dev
 
 ```bash
 npm run check                              # 版本一致性、TypeScript 检查、前端测试和构建
-npm run typecheck                          # 检查已迁移的 TypeScript 代码
+npm run typecheck                          # 检查前端 TypeScript 代码
 npm test                                   # 下载队列及界面交互测试
 cargo fmt --manifest-path src-tauri/Cargo.toml --check    # Rust 格式检查
 cargo test --manifest-path src-tauri/Cargo.toml --locked  # Rust 后端测试
@@ -117,7 +117,10 @@ npm run tauri build                        # 构建当前平台的桌面安装�
 ## 项目结构
 
 ```text
-src/                  界面、交互与样式
+src/main.ts           前端入口和交互协调
+src/react/            React 页面与弹窗
+src/lib/              类型化前端业务与状态
+src/                  界面资源与样式
 src/job-manager.ts    下载队列、进度、取消和恢复
 src-tauri/src/        Tauri 命令、游戏安装、账户与其他后端功能
 tests/                界面交互及下载队列测试

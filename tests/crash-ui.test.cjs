@@ -1,18 +1,15 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
 const {JSDOM}=require('jsdom');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,10));
 function boot(){
  const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
  const w=dom.window,calls=[],listeners={};require('./react-renderer-helper.cjs')(w);
  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:'1.20.1',gameDir:'/game'}));
- w.setInterval=()=>0;w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async(name,callback)=>{listeners[name]=callback;return ()=>{};};w.openDialog=async()=>null;w.saveDialog=async()=>null;
+ w.setInterval=()=>0;w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async(name,callback)=>{listeners[name]=callback;return ()=>{};};w.openDialog=async()=>null;w.saveDialog=async()=>null;
  w.invoke=async(name,args={})=>{calls.push({name,args});if(name==='list_versions'||name==='installed_versions')return [{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}];if(name==='launch_game')return '/game/logs/ccl/launch-1.log';if(name==='list_mods')return [];return null;};
  w.appVersion=require('../package.json').version;
- w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
- const src=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');w.eval('"use strict";\n'+src+'\nwindow.render=render;window.refreshMods=refreshMods;');
+ require('./react-renderer-helper.cjs').runMain(w);
  const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};
  return {w,calls,listeners,click,close:()=>w.close()};
 }

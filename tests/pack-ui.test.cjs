@@ -1,14 +1,12 @@
 const test=require('node:test');
 const assert=require('node:assert/strict');
-const fs=require('node:fs');
-const path=require('node:path');
 const {JSDOM}=require('jsdom');
 const tick=()=>new Promise(resolve=>setTimeout(resolve,10));
 function boot(options={}){
  const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
  const w=dom.window,calls=[],pending=[];require('./react-renderer-helper.cjs')(w);
  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:'1.20.1',gameDir:'/game'}));
- w.setInterval=()=>0;w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};w.openDialog=async()=>null;w.saveDialog=async()=>null;
+ w.setInterval=()=>0;w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};w.openDialog=async()=>null;w.saveDialog=async()=>null;
  w.invoke=(name,args={})=>{calls.push({name,args});
   if(name==='list_versions'||name==='installed_versions')return Promise.resolve([{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}]);
   if(name==='list_mods')return Promise.resolve([]);
@@ -34,8 +32,7 @@ function boot(options={}){
   return Promise.resolve();
  };
  w.appVersion=require('../package.json').version;
- w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
- const src=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');w.eval('"use strict";\n'+src+'\nwindow.render=render;window.refreshMods=refreshMods;');
+ require('./react-renderer-helper.cjs').runMain(w);
  const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};
  const change=(selector,value)=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.value=value;el.dispatchEvent(new w.Event('change',{bubbles:true}));};
  return {w,calls,pending,click,change,close:()=>w.close()};
@@ -214,4 +211,13 @@ test('keeps a selected version when project details finish loading asynchronousl
   app.click('[data-action=confirm-mod-install]');await tick();
   assert.equal(app.calls.findLast(c=>c.name==='install_pack').args.packVersionId,'pack2');
  } finally {app.close();}
+});
+
+
+test('navigation works when a user clicks an SVG icon',async()=>{
+ const app=boot();try {
+  await tick();const icon=app.w.document.querySelector('[data-page="content"] svg');assert.ok(icon);
+  icon.dispatchEvent(new app.w.MouseEvent('click',{bubbles:true}));await tick();
+  assert.ok(app.w.document.querySelector('#content-form'));
+ }finally{app.close();}
 });

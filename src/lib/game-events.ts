@@ -2,8 +2,8 @@ import type {Crash,Diagnosis,LaunchView} from '../react/launch';
 import type {ProfileView} from './game-profile';
 interface GameCrash extends Crash {gameDir:string;logName:string|null}
 interface State {page:string;launchView:LaunchView|null;profileView:ProfileView|null}
-interface WindowEvent {launchId:string;status?:string}
-interface ExitEvent {launchId?:string;version:string;gameDir:string;success:boolean;logPath?:string;code?:number|null;diagnosis?:Diagnosis|null}
+export interface WindowEvent {launchId:string;status?:string}
+export interface ExitEvent {launchId?:string;version:string;gameDir:string;success:boolean;logPath?:string;code?:number|null;diagnosis?:Diagnosis|null}
 interface Options {state:State;render:()=>void;renderOverlay:()=>void;showCrash:(crash:GameCrash)=>void;refreshStats:(view:ProfileView)=>Promise<unknown>}
 export function createGameEvents({state,render,renderOverlay,showCrash,refreshStats}:Options) {
  return {

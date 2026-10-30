@@ -5,7 +5,7 @@ export interface JobSpec {key:string;kind:string;title:string;gameDir?:string;ve
 export interface Job extends JobSpec {id:string;status:JobStatus;message:string;current:number;total:number;error:string;metrics?:string;registered?:boolean;cancelRequested?:boolean;resultVersion?:string;lastSample?:{time:number;current:number;total:number}|null}
 interface JobState {jobs:Job[];page:string;jobLimit:number;javaPath:string;gameDir:string;contentKey:string;javaRuntimes:unknown[]}
 interface Dependencies {state:JobState;invoke:(command:string,args?:Record<string,unknown>)=>Promise<unknown>;persist:()=>void;renderChrome:()=>void;flash:(message:string,kind?:string)=>void;render:()=>void;refreshInstalled:(gameDir:string)=>Promise<unknown>;onJobFinished:(job:Job)=>Promise<unknown>;renderDownloads?:()=>void;storage?:Pick<Storage,'getItem'|'setItem'>}
-interface JobProgress {jobId:string;message:string;current:number;total:number}
+export interface JobProgress {jobId:string;message:string;current:number;total:number}
 // Download queue and persisted retry recipes. UI and Tauri operations are injected
 // so the state machine can be exercised without a desktop runtime.
 export function createJobManager({state, invoke, persist, renderChrome, flash, render, refreshInstalled, onJobFinished, renderDownloads = () => {}, storage = globalThis.localStorage}: Dependencies) {

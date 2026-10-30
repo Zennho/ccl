@@ -1,7 +1,5 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
 const { JSDOM } = require('jsdom');
 const { IDBFactory } = require('fake-indexeddb');
 
@@ -21,7 +19,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch, app
   if(database) w.indexedDB=database;
   w.localStorage.setItem('ccl-settings', JSON.stringify({accountMode:preference,accountKnown:known,selected:installed.id,gameDir:'/game',...savedSettings}));
   if(instanceSettings)w.localStorage.setItem('ccl-instance-launch-settings',JSON.stringify(instanceSettings));
-  w.setInterval=()=>0; w.__icons = {}; w.createIcons = () => {}; w.isTauri = () => true;
+  w.setInterval=()=>0; w.isTauri = () => true;
   w.getCurrentWindow = () => ({}); w.listen = async () => () => {};
   w.openDialog = async () => selectedSkin ? '/skin.png' : null; w.saveDialog = async () => null;
   w.invoke = async (name,args={}) => {
@@ -39,9 +37,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch, app
     if(name==='switch_microsoft_account')return switchAccount ? switchAccount(args.uuid) : null;
   };
   w.appVersion = require('../package.json').version;
-  w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
-  const source=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');
-  w.eval('"use strict";\n'+source+'\nwindow.render=render;window.refreshMods=refreshMods;');
+  require('./react-renderer-helper.cjs').runMain(w);
   const click = selector => { const el=w.document.querySelector(selector);assert.ok(el,selector);el.click(); };
   return {w, calls, click, close:()=>w.close()};
 }

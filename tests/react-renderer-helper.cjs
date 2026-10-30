@@ -61,5 +61,17 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/content-install.ts',['createContentInstall']);
  load(window,'lib/global-settings.ts',['createGlobalSettings']);
  load(window,'lib/content-controls.ts',['createContentControls']);
+ load(window,'react/overlay-controller.tsx',['createOverlayController']);
+ load(window,'react/page-controller.tsx',['createPageController']);
  load(window,'lib/render-cycle.ts',['createRenderCycle']);
+};
+
+// Load the actual TypeScript entry in strict mode for browser integration tests.
+module.exports.runMain = function runMain(window, { exposeInternals = false } = {}) {
+ const source = filename => fs.readFileSync(path.join(__dirname,'../src',filename),'utf8');
+ const jobManager = transformSync(source('job-manager.ts'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,'');
+ window.eval(jobManager);
+ const main = transformSync(source('main.ts'),{loader:'ts',format:'esm',target:'es2022'}).code.replace(/^import .*;\r?\n/gm,'');
+ const hooks = exposeInternals ? 'window.__cclTest={restoreJobs,bannerPeriod};window.restoreThemeImages=restoreThemeImages;' : '';
+ window.eval(`"use strict";\n${main}\nwindow.render=render;window.refreshMods=refreshMods;${hooks}`);
 };
