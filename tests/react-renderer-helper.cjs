@@ -60,4 +60,5 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/skin-controller.ts',['createSkinController']);
  load(window,'lib/content-install.ts',['createContentInstall']);
  load(window,'lib/global-settings.ts',['createGlobalSettings']);
+ load(window,'lib/content-controls.ts',['createContentControls']);
 };
