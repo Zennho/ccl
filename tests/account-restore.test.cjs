@@ -7,9 +7,10 @@ const tick = () => new Promise(resolve => setTimeout(resolve, 10));
 async function waitFor(predicate, message) {
  const deadline=Date.now()+5000;while(Date.now()<deadline){if(await predicate())return;await tick();}assert.fail(message);
 }
-function cachedAvatar(database,uuid) {
- return new Promise((resolve,reject)=>{const open=database.open('ccl-appearance',1);open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result;if(!db.objectStoreNames.contains('images')){db.close();resolve(undefined);return;}const tx=db.transaction('images','readonly'),request=tx.objectStore('images').get(`online-avatar:${uuid}`);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);tx.oncomplete=()=>db.close();};});
+function storedImage(database,key) {
+ return new Promise((resolve,reject)=>{const open=database.open('ccl-appearance',1);open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result;if(!db.objectStoreNames.contains('images')){db.close();resolve(undefined);return;}const tx=db.transaction('images','readonly'),request=tx.objectStore('images').get(key);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);tx.oncomplete=()=>db.close();};});
 }
+function cachedAvatar(database,uuid) { return storedImage(database,`online-avatar:${uuid}`); }
 
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
 function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings, rememberAccount, listJava} = {}) {
@@ -224,9 +225,16 @@ test('avatar follows active account skin and handles loading errors', async () =
 test('offline skin preview is restored after reopening and can be cleared', async () => {
  const database=new IDBFactory();
  const first=boot({preference:'offline',database,selectedSkin:'data:image/png;base64,local'});
- try {await tick();first.click('[data-page="account"]');first.click('[data-action="choose-skin"]');await tick();await tick();} finally {first.close();}
+ try {
+  await tick();first.click('[data-page="account"]');first.click('[data-action="choose-skin"]');
+  await waitFor(async()=> (await storedImage(database,'local-skin'))?.data==='data:image/png;base64,local','local skin was not saved');
+ } finally {first.close();}
  const second=boot({preference:'offline',database});
- try {await tick();await tick();assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,local');second.click('[data-page="account"]');second.click('[data-action="clear-skin"]');await tick();await tick();} finally {second.close();}
+ try {
+  await waitFor(()=>second.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,local','saved skin was not restored');
+  second.click('[data-page="account"]');second.click('[data-action="clear-skin"]');await tick();
+  await waitFor(async()=> (await storedImage(database,'local-skin'))===undefined,'local skin was not cleared');
+ } finally {second.close();}
  const third=boot({preference:'offline',database});
  try {await tick();await tick();assert.equal(third.w.document.querySelector('.avatar-face'),null);} finally {third.close();}
 });
