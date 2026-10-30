@@ -337,33 +337,35 @@ test('account switch failures preserve the previous session or expose a retry', 
 test('cached online avatar appears before restoration and updates after a skin change', async () => {
  const database=new IDBFactory();
  const first=boot({known:true,database,restore:()=>({name:'RealPlayer',uuid:'account-one'}),appearance:()=>({skin:'data:image/png;base64,old',model:'classic',capes:[]})});
- try {await tick();await tick();assert.equal(first.w.document.querySelector('.avatar-face').src,'data:image/png;base64,old');assert.equal(JSON.parse(first.w.localStorage.getItem('ccl-settings')).accountUuid,'account-one');await tick();} finally {first.close();}
+ try {await waitFor(()=>cachedAvatar(database,'account-one').then(value=>value==='data:image/png;base64,old'),'old avatar was not cached');assert.equal(JSON.parse(first.w.localStorage.getItem('ccl-settings')).accountUuid,'account-one');} finally {first.close();}
  let completeRestore,completeAppearance;
  const second=boot({known:true,database,savedSettings:{accountUuid:'account-one',accountName:'RealPlayer'},restore:()=>new Promise(resolve=>{completeRestore=resolve;}),appearance:()=>new Promise(resolve=>{completeAppearance=resolve;})});
  try {
-  await tick();await tick();assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,old');
+  await waitFor(()=>second.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,old','old avatar was not restored');
   assert.equal(second.calls.filter(c=>c.name==='get_appearance').length,0);
-  completeRestore({name:'RealPlayer',uuid:'account-one'});await tick();
+  completeRestore({name:'RealPlayer',uuid:'account-one'});
+  await waitFor(()=>typeof completeAppearance==='function','appearance request did not start');
   assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,old');
-  completeAppearance({skin:'data:image/png;base64,new',model:'classic',capes:[]});await tick();await tick();
-  assert.equal(second.w.document.querySelector('.avatar-face').src,'data:image/png;base64,new');
+  completeAppearance({skin:'data:image/png;base64,new',model:'classic',capes:[]});
+  await waitFor(()=>second.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,new','new avatar was not displayed');
+  await waitFor(()=>cachedAvatar(database,'account-one').then(value=>value==='data:image/png;base64,new'),'new avatar was not cached');
  } finally {second.close();}
  let resolveRestore;
  const third=boot({known:true,database,savedSettings:{accountUuid:'account-one',accountName:'RealPlayer'},restore:()=>new Promise(resolve=>{resolveRestore=resolve;})});
- try {await tick();await tick();assert.equal(third.w.document.querySelector('.avatar-face').src,'data:image/png;base64,new');} finally {third.close();}
+ try {await waitFor(()=>third.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,new','new avatar was not restored');} finally {third.close();}
 });
 
 test('cached avatars are separated by account and are hidden for offline mode', async () => {
  const database=new IDBFactory();const accounts=[{uuid:'one',name:'First'},{uuid:'two',name:'Second'}];
  const first=boot({known:true,database,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
- try {await tick();await tick();}finally{first.close();}
+ try {await waitFor(()=>cachedAvatar(database,'one').then(value=>value==='data:image/png;base64,one'),'first avatar was not cached');}finally{first.close();}
  const second=boot({known:true,database,restore:()=>({uuid:'two',name:'Second'}),appearance:()=>({skin:'data:image/png;base64,two',model:'classic',capes:[]})});
- try {await tick();await tick();}finally{second.close();}
+ try {await waitFor(()=>cachedAvatar(database,'two').then(value=>value==='data:image/png;base64,two'),'second avatar was not cached');}finally{second.close();}
  let completeSwitch;
  const app=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},savedAccounts:accounts,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]}),switchAccount:()=>new Promise(resolve=>{completeSwitch=resolve;})});
  try {
-  await tick();await tick();app.click('[data-page="account"]');await tick();app.click('[data-switch-account="two"]');await tick();
-  assert.equal(app.w.document.querySelector('.avatar-face').src,'data:image/png;base64,two','selected account uses its own cached avatar');
+  await waitFor(()=>app.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,one','first avatar was not restored');app.click('[data-page="account"]');await tick();app.click('[data-switch-account="two"]');
+  await waitFor(()=>app.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,two','selected account uses its own cached avatar');
   app.click('[data-action="use-offline"]');assert.equal(app.w.document.querySelector('.avatar-face'),null,'offline mode does not show an online skin');
   completeSwitch({account:{uuid:'two',name:'Second'},error:null});await tick();
   assert.equal(app.w.document.querySelector('.avatar-face'),null,'late authentication does not replace offline avatar');
@@ -373,7 +375,7 @@ test('cached avatars are separated by account and are hidden for offline mode', 
 test('logout removes the selected cached avatar', async () => {
  const database=new IDBFactory();
  const first=boot({known:true,database,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
- try {await tick();await tick();first.click('[data-page="account"]');await tick();first.click('[data-action="logout-microsoft"]');await tick();await tick();}finally{first.close();}
+ try {await waitFor(()=>cachedAvatar(database,'one').then(value=>value==='data:image/png;base64,one'),'avatar was not cached');first.click('[data-page="account"]');await tick();first.click('[data-action="logout-microsoft"]');await waitFor(()=>cachedAvatar(database,'one').then(value=>value===undefined),'avatar was not cleared');}finally{first.close();}
  const second=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>new Promise(()=>{})});
  try {await tick();await tick();assert.equal(second.w.document.querySelector('.avatar-face'),null);}finally{second.close();}
 });
