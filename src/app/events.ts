@@ -118,6 +118,7 @@ export function installApplicationEvents({
     invoke,
     render,
     renderChrome,
+    renderOverlay,
     persist,
     flash,
     refreshJava: instances.versions.refreshJava,
@@ -180,7 +181,9 @@ export function installApplicationEvents({
   });
   container.addEventListener('keydown', (event) => {
     if (event.key !== 'Escape' || event.isComposing) return;
-    const menu = container.querySelector<HTMLDetailsElement>('[data-home-version-menu][open]');
+    const menu = container.querySelector<HTMLDetailsElement>(
+      '[data-home-version-menu][open], [data-background-jobs][open]',
+    );
     if (!menu) return;
     menu.open = false;
     menu.querySelector<HTMLElement>('summary')?.focus();
@@ -201,7 +204,9 @@ export function installApplicationEvents({
     beforeDispatch: (target) => {
       if (!target.closest('[data-theme-reset]')) closeVersionMenus(container, target);
       container
-        .querySelectorAll<HTMLDetailsElement>('[data-home-version-menu][open]')
+        .querySelectorAll<HTMLDetailsElement>(
+          '[data-home-version-menu][open], [data-background-jobs][open]',
+        )
         .forEach((menu) => {
           if (!menu.contains(target) || target.closest('button')) menu.open = false;
         });

@@ -7,6 +7,7 @@ interface Options {
   invoke: typeof invoke;
   render: () => void;
   renderChrome: () => void;
+  renderOverlay: () => void;
   persist: () => void;
   flash: (message: string, kind?: string) => void;
   refreshJava: () => Promise<unknown>;
@@ -17,6 +18,7 @@ export function createDownloadHandler({
   invoke,
   render,
   renderChrome,
+  renderOverlay,
   persist,
   flash,
   refreshJava,
@@ -74,7 +76,8 @@ export function createDownloadHandler({
     const retry = target.closest<HTMLElement>('[data-retry-job]');
     if (retry) {
       const old = state.jobs.find((job) => job.id === retry.dataset.retryJob);
-      if (old?.run)
+      if (old?.run) {
+        state.jobNotices = state.jobNotices.filter((id) => id !== old.id);
         jobs.enqueueJob({
           key: old.key,
           kind: old.kind,
@@ -84,17 +87,13 @@ export function createDownloadHandler({
           run: old.run,
           recipe: old.recipe,
         });
+      }
       return true;
     }
-    const remove = target.closest<HTMLElement>('[data-remove-job]');
-    if (remove) {
-      state.jobs = state.jobs.filter(
-        (job) =>
-          job.id !== remove.dataset.removeJob ||
-          !['done', 'failed', 'cancelled'].includes(job.status),
-      );
-      jobs.saveJobs();
-      jobs.renderJobList();
+    const dismissJob = target.closest<HTMLElement>('[data-dismiss-job]');
+    if (dismissJob) {
+      state.jobNotices = state.jobNotices.filter((id) => id !== dismissJob.dataset.dismissJob);
+      renderChrome();
       return true;
     }
     const cancel = target.closest<HTMLElement>('[data-cancel-job]');
@@ -104,20 +103,14 @@ export function createDownloadHandler({
     }
     const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;
     switch (action) {
-      case 'cancel-all-jobs':
-        return Promise.all(
-          state.jobs
-            .filter((job) => job.status === 'queued' || job.status === 'running')
-            .map(jobs.requestJobCancel),
-        ).then(() => jobs.pumpJobs());
-      case 'clear-jobs':
-        state.jobs = state.jobs.filter(
-          (job) => !['done', 'failed', 'cancelled'].includes(job.status),
-        );
-        jobs.saveJobs();
-        if (state.page === 'downloads') render();
-        else renderChrome();
+      case 'close-download-progress': {
+        const current = state.jobs.find((job) => job.id === state.foregroundJobId);
+        if (current && ['queued', 'running', 'canceling'].includes(current.status)) return true;
+        state.foregroundJobId = null;
+        renderOverlay();
+        renderChrome();
         return true;
+      }
       case 'refresh-java':
         return refreshJava().then(() => {});
       case 'cancel-java-remove':

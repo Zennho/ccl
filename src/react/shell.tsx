@@ -8,7 +8,16 @@ interface ShellProps {
   skin: string;
   version: string;
   installedCount: number;
-  jobCount: number;
+  backgroundJobs: { id: string; title: string; status: string }[];
+  foregroundActive: boolean;
+  jobNotices: {
+    id: string;
+    title: string;
+    message: string;
+    error: string;
+    status: string;
+    run: unknown;
+  }[];
   updateInfo: { available: boolean; latestVersion: string } | null;
   updateDismissed: string;
   notice: string;
@@ -20,7 +29,6 @@ const navigation = [
   ['versions', 'layers-3', '版本管理'],
   ['content', 'blocks', '模组与资源'],
   ['multiplayer', 'globe-2', '多人联机'],
-  ['downloads', 'download', '下载任务'],
   ['java', 'monitor', 'Java 管理'],
   ['settings', 'settings', '启动设置'],
 ] as const;
@@ -75,7 +83,7 @@ export function Shell(p: ShellProps) {
           </button>
         </div>
       </header>
-      <aside className="sidebar">
+      <aside className="sidebar" inert={p.foregroundActive}>
         <div className="brand">
           <div className="brand-mark" aria-hidden="true"></div>
           <div>
@@ -90,9 +98,6 @@ export function Shell(p: ShellProps) {
             <button key={page} data-page={page} className={p.page === page ? 'active' : ''}>
               <Icon name={icon} />
               <span>{label}</span>
-              {page === 'downloads' && (
-                <b className={`job-badge${p.jobCount ? ' has-jobs' : ''}`}>{p.jobCount || ''}</b>
-              )}
             </button>
           ))}
         </nav>
@@ -102,7 +107,7 @@ export function Shell(p: ShellProps) {
           </div>
         </div>
       </aside>
-      <main className="main">
+      <main className="main" inert={p.foregroundActive}>
         <header className="topbar">
           <div className="breadcrumbs">
             <strong>
@@ -125,6 +130,37 @@ export function Shell(p: ShellProps) {
                 </div>
               )}
             </div>
+            {p.backgroundJobs.length > 0 && (
+              <details className="background-downloads" data-background-jobs>
+                <summary aria-label={`${p.backgroundJobs.length} 个后台任务`}>
+                  后台下载 <span>{p.backgroundJobs.length}</span>
+                </summary>
+                <div className="background-download-list">
+                  {p.backgroundJobs.map((job) => (
+                    <div key={job.id}>
+                      <span>
+                        <strong>{job.title}</strong>
+                        <small>
+                          {job.status === 'queued'
+                            ? '等待中'
+                            : job.status === 'canceling'
+                              ? '正在取消'
+                              : '下载中'}
+                        </small>
+                      </span>
+                      <button
+                        type="button"
+                        data-cancel-job={job.id}
+                        disabled={job.status === 'canceling'}
+                        aria-label={`取消 ${job.title}`}
+                      >
+                        取消
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
             <button
               type="button"
               className={`account-entry${p.page === 'account' ? ' active' : ''}`}
@@ -146,7 +182,27 @@ export function Shell(p: ShellProps) {
         <div className="content"></div>
       </main>
       <div id="modal-root"></div>
-      <div id="toast-root">
+      <div id="toast-root" inert={p.foregroundActive}>
+        {p.jobNotices.map((job) => (
+          <div
+            className={`toast ${job.status === 'failed' ? 'error' : ''}`}
+            key={job.id}
+            role="status"
+          >
+            <span>
+              {job.title}：{job.message}
+              {job.error ? `：${job.error}` : ''}
+            </span>
+            {job.status === 'failed' && !!job.run && (
+              <button className="toast-log" data-retry-job={job.id}>
+                重试
+              </button>
+            )}
+            <button data-dismiss-job={job.id} aria-label={`关闭 ${job.title} 通知`}>
+              <Icon name="x" size={15} />
+            </button>
+          </div>
+        ))}
         {p.notice && (
           <div className={`toast ${p.noticeKind}`}>
             {p.notice}

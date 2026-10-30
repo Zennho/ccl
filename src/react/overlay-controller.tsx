@@ -8,6 +8,7 @@ import { InstallDialog } from './install-dialog';
 import { ArchiveDialog } from './archive-dialog';
 import { LocalModDialog } from './local-mod-dialog';
 import { ContentDialog } from './content-dialog';
+import { DownloadProgress } from './download-progress';
 import type { createRenderer } from './renderer';
 import type { LauncherState } from '../lib/launcher-state';
 import type { InstanceSettings } from './types';
@@ -39,7 +40,10 @@ export function createOverlayController({
 }: Options) {
   return function renderOverlay() {
     if (!container.querySelector('#modal-root')) return;
-    if (state.launchView)
+    const foregroundJob = state.jobs.find((job) => job.id === state.foregroundJobId);
+    if (foregroundJob)
+      renderer.overlay(DownloadProgress, { job: foregroundJob }, `download:${foregroundJob.id}`);
+    else if (state.launchView)
       renderer.overlay(LaunchScreen, { view: state.launchView }, `launch:${state.launchView.id}`);
     else if (state.crashDialog) renderer.overlay(CrashDialog, { crash: state.crashDialog });
     else if (state.instanceSettingsView) {

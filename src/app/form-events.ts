@@ -78,13 +78,6 @@ export function installFormEvents(options: Options): void {
       options.skin.setModel(target.value);
       return;
     }
-    if (target.id === 'job-limit') {
-      state.jobLimit = Math.max(1, Math.min(5, Number(target.value) || 3));
-      options.persist();
-      render();
-      options.pumpJobs();
-      return;
-    }
     if (target.id === 'local-mod-filter') {
       state.modFilter = target.value;
       renderMods();

@@ -52,6 +52,7 @@ export interface Job extends JobSpec {
 }
 interface JobState {
   jobs: Job[];
+  foregroundJobId?: string | null;
   page: string;
   jobLimit: number;
   javaPath: string;
@@ -68,7 +69,8 @@ interface Dependencies {
   render: () => void;
   refreshInstalled: (gameDir: string) => Promise<unknown>;
   onJobFinished: (job: Job) => Promise<unknown>;
-  renderDownloads?: () => void;
+  renderForeground?: () => void;
+  notifyJob?: (job: Job) => void;
   storage?: Pick<Storage, 'getItem' | 'setItem'>;
 }
 export interface JobProgress {
@@ -88,7 +90,8 @@ export function createJobManager({
   render,
   refreshInstalled,
   onJobFinished,
-  renderDownloads = () => {},
+  renderForeground = () => {},
+  notifyJob,
   storage = globalThis.localStorage,
 }: Dependencies) {
   function runnerFor(recipe: Recipe | undefined): ((job: Job) => Promise<unknown>) | null {
@@ -146,12 +149,12 @@ export function createJobManager({
   const { saveJobs, restoreJobs } = createJobHistory({ state, storage, runnerFor });
 
   function renderJobList() {
-    if (state.page === 'downloads') renderDownloads();
     renderChrome();
+    if (state.foregroundJobId) renderForeground();
   }
   function updateJob(job: Job, patch: Partial<Job>) {
     Object.assign(job, patch);
-    if (state.page === 'downloads') renderDownloads();
+    if (state.foregroundJobId === job.id) renderForeground();
   }
 
   const jobEvent = createJobProgressHandler({ state, updateJob });
@@ -177,9 +180,9 @@ export function createJobManager({
       error: '',
     };
     state.jobs.push(job);
+    if (job.kind === 'game' || job.kind === 'modpack') state.foregroundJobId = job.id;
     saveJobs();
     renderJobList();
-    flash(`已加入下载任务：${job.title}`);
     pumpJobs();
   }
   function pumpJobs() {
@@ -209,7 +212,10 @@ export function createJobManager({
           job.message =
             job.kind === 'export' ? '导出完成' : job.kind === 'import' ? '导入完成' : '安装完成';
           job.current = job.total;
-          if (state.page !== 'downloads') flash(`${job.title}：${job.message}`);
+          if (state.foregroundJobId !== job.id) {
+            if (notifyJob) notifyJob(job);
+            else flash(`${job.title}：${job.message}`);
+          }
         })
         .catch((e) => {
           if (job.cancelRequested) {
@@ -221,8 +227,10 @@ export function createJobManager({
             job.message =
               job.kind === 'export' ? '导出失败' : job.kind === 'import' ? '导入失败' : '安装失败';
             job.error = String(e);
-            if (state.page !== 'downloads')
-              flash(`${job.title}：${job.message}，请查看下载任务。`, 'error');
+            if (state.foregroundJobId !== job.id) {
+              if (notifyJob) notifyJob(job);
+              else flash(`${job.title}：${job.message}：${job.error}`, 'error');
+            }
           }
         })
         .finally(async () => {

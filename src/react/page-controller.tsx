@@ -2,7 +2,6 @@ import { HomePage } from './home-page';
 import { VersionsPage } from './versions-page';
 import { JavaPage } from './java-page';
 import { ContentPage } from './content';
-import { DownloadsPage } from './downloads';
 import { SettingsPage, type SettingsProps } from './settings';
 import { AccountPage } from './account';
 import { LanRoomPage } from './lan-room';
@@ -60,10 +59,6 @@ export function createPageController({
       },
       'settings',
     );
-  }
-  function downloads() {
-    if (!container.querySelector('#job-list') && state.page !== 'downloads') return;
-    renderer.page(DownloadsPage, { jobs: state.jobs, limit: state.jobLimit }, 'downloads');
   }
   function servers() {
     renderer.page(
@@ -130,10 +125,6 @@ export function createPageController({
       content();
       return;
     }
-    if (state.page === 'downloads') {
-      downloads();
-      return;
-    }
     if (state.page === 'settings') {
       settings();
       return;
@@ -171,5 +162,5 @@ export function createPageController({
       hydrateThumbnails();
     } else versions();
   }
-  return { page, content, settings, downloads, servers, versions, search };
+  return { page, content, settings, servers, versions, search };
 }

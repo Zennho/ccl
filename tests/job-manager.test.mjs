@@ -122,10 +122,3 @@ test('background task completion and failure show a concise notification', async
  assert(notices.some(([message])=>message.includes('成功项目')&&message.includes('安装完成')));
  assert(notices.some(([message,kind])=>message.includes('失败项目')&&message.includes('安装失败')&&kind==='error'));
 });
-
-test('finished tasks do not produce a toast while the task list is visible', async () => {
- const notices=[]; const state={jobs:[],jobLimit:1,page:'downloads',javaPath:'java',contentKey:'',gameDir:'/game',javaRuntimes:[]};
- const manager=createJobManager({state,storage:{getItem:()=>null,setItem:()=>{}},invoke:async()=>{},persist(){},renderChrome(){},render(){},flash:(message)=>notices.push(message),refreshInstalled:async()=>{},onJobFinished:async()=>{}});
- manager.enqueueJob({key:'ok',kind:'mod',title:'项目',run:async()=>{}});notices.length=0;
- await tick();await tick();assert.equal(state.jobs[0].status,'done');assert.deepEqual(notices,[]);
-});

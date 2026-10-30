@@ -132,7 +132,7 @@ export function InstallDialog({ draft, addons }: { draft: InstallDraft; addons: 
               ['checking', 'unavailable'].includes(draft.compatibility[draft.loader])
             }
           >
-            加入下载任务 <Icon name="chevron-right" size={16} />
+            开始安装 <Icon name="chevron-right" size={16} />
           </button>
         </div>
       </section>

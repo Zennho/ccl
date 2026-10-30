@@ -9,7 +9,7 @@ function load(window, filename, exports) {
 }
 module.exports=function installReactRenderer(window) {
  global.window=window;global.document=window.document;global.navigator=window.navigator;
- window.React=require('react');window.useState=window.React.useState;window.createRoot=require('react-dom/client').createRoot;
+ window.React=require('react');window.useState=window.React.useState;window.useRef=window.React.useRef;window.useEffect=window.React.useEffect;window.createRoot=require('react-dom/client').createRoot;
  window.flushSync=require('react-dom').flushSync;
  const icons=require('lucide');for(const name of ['Blocks','Box','ChevronDown','ChevronRight','Compass','Download','FolderOpen','Gamepad2','Globe2','HardDrive','Layers3','LayoutGrid','Monitor','MoreHorizontal','Minus','Play','RefreshCw','Settings','Settings2','Square','UserRound','X','Zap'])window[name]=icons[name];
  load(window,'lib/appearance.ts',['appearanceDefaults','clampAppearance','bannerPeriod','imageStore','validateThemeImage']);
@@ -48,7 +48,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/launch.tsx',['LaunchScreen','CrashDialog']);
  load(window,'react/install-dialog.tsx',['InstallDialog']);
  load(window,'react/archive-dialog.tsx',['ArchiveDialog']);
- load(window,'react/downloads.tsx',['DownloadsPage']);
+ load(window,'react/download-progress.tsx',['DownloadProgress']);
  load(window,'react/settings.tsx',['SettingsPage']);
  load(window,'react/account.tsx',['AccountPage']);
  load(window,'react/manage-dialog.tsx',['ManageDialog']);

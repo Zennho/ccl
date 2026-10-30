@@ -87,8 +87,8 @@ test('downloads selected resource pack version to the chosen vanilla game and ca
   const radio=app.w.document.querySelector('[name=modVersion][value=pack2]');radio.checked=true;
   app.click('[data-action=confirm-mod-install]');await tick();
   const install=app.calls.findLast(c=>c.name==='install_pack');assert.equal(install.args.kind,'resourcepack');assert.equal(install.args.version,'1.20.1');assert.equal(install.args.packVersionId,'pack2');
-  app.click('[data-page=downloads]');app.click(`[data-cancel-job="${install.args.jobId}"]`);await tick();await tick();
-  assert.ok(app.w.document.querySelector(`[data-job-id="${install.args.jobId}"]`).classList.contains('cancelled'));
+  app.click('[data-background-jobs] summary');app.click(`[data-cancel-job="${install.args.jobId}"]`);await tick();await tick();
+  assert.ok(app.calls.some(c=>c.name==='cancel_job'&&c.args.jobId===install.args.jobId));assert.ok(!app.w.document.querySelector('[data-background-jobs]'));
  } finally {app.close();}
 });
 
@@ -103,7 +103,7 @@ test('shader packs support CurseForge without persisting its API key',async()=>{
   app.click('[data-content-install="0"]');await tick();app.click('[data-action=confirm-mod-install]');await tick();
   const install=app.calls.findLast(c=>c.name==='install_pack');assert.equal(install.args.kind,'shader');assert.equal(install.args.source,'curseforge');assert.equal(install.args.apiKey,'sample-secret-key');
   assert.doesNotMatch(app.w.localStorage.getItem('ccl-job-history'),/sample-secret-key/);
-  app.click('[data-page=downloads]');app.click(`[data-cancel-job="${install.args.jobId}"]`);await tick();
+  app.click('[data-background-jobs] summary');app.click(`[data-cancel-job="${install.args.jobId}"]`);await tick();
  } finally {app.close();}
 });
 

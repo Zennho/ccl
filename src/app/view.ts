@@ -65,7 +65,18 @@ export function createApplicationView({
       skin: account.playerSkin(),
       version: appVersion,
       installedCount: state.versions.filter((version) => version.installed).length,
-      jobCount: jobs.activeJobCount(),
+      backgroundJobs: state.jobs
+        .filter(
+          (job) =>
+            job.id !== state.foregroundJobId &&
+            ['queued', 'running', 'canceling'].includes(job.status),
+        )
+        .map(({ id, title, status }) => ({ id, title, status })),
+      foregroundActive: !!state.foregroundJobId,
+      jobNotices: state.jobNotices.flatMap((id) => {
+        const job = state.jobs.find((item) => item.id === id);
+        return job ? [job] : [];
+      }),
       updateInfo: state.updateInfo,
       updateDismissed: state.updateDismissed,
       notice: state.notice,

@@ -100,6 +100,7 @@ export interface LauncherState {
   loading: boolean;
   notice: string;
   noticeKind: string;
+  jobNotices: string[];
   online: boolean;
   javaRuntimes: JavaRuntime[];
   javaLoading: boolean;
@@ -163,6 +164,7 @@ export interface LauncherState {
   modUpdates: UpdateReport | null;
   modDelete: string[] | null;
   jobs: Job[];
+  foregroundJobId: string | null;
   jobLimit: number;
   installDraft: {
     version: string;
@@ -290,6 +292,7 @@ export function createInitialState(saved: SavedSettings): LauncherState {
     loading: false,
     notice: '',
     noticeKind: '',
+    jobNotices: [],
     online: false,
     javaRuntimes: [],
     javaLoading: false,
@@ -349,6 +352,7 @@ export function createInitialState(saved: SavedSettings): LauncherState {
     modUpdates: null,
     modDelete: null,
     jobs: [],
+    foregroundJobId: null,
     jobLimit: Math.max(1, Math.min(5, Number(saved.jobLimit) || 3)),
     installDraft: null,
   };

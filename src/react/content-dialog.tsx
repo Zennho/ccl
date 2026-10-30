@@ -229,7 +229,8 @@ export function ContentDialog({
             data-action="confirm-mod-install"
             disabled={d.installed || (!pack && (d.loading || !!d.error || !d.versions.length))}
           >
-            {d.installed ? '已安装' : '加入下载任务'} <Icon name="chevron-right" size={16} />
+            {d.installed ? '已安装' : d.kind === 'modpack' ? '开始安装' : '后台安装'}{' '}
+            <Icon name="chevron-right" size={16} />
           </button>
         </div>
       </section>

@@ -129,7 +129,11 @@ const jobs = createJobManager({
   flash,
   render,
   refreshInstalled: instances.versions.refreshInstalled,
-  renderDownloads: () => view.pages.downloads(),
+  renderForeground: renderOverlay,
+  notifyJob: (job) => {
+    state.jobNotices.push(job.id);
+    renderChrome();
+  },
   onJobFinished: content.onJobFinished,
 });
 const contentInstall = createContentInstall({
@@ -235,7 +239,12 @@ void startApplication({
   state,
   isDesktop: isTauri,
   updateBanner: appearance.updateDefaultBanner,
-  restoreJobs: jobs.restoreJobs,
+  restoreJobs: () => {
+    jobs.restoreJobs();
+    state.jobNotices = state.jobs
+      .filter((job) => job.status === 'failed' && job.message.startsWith('任务因启动器关闭而中断'))
+      .map((job) => job.id);
+  },
   render,
   restoreTheme: appearance.restore,
   restoreSkin: account.avatars.restoreLocalSkin,
