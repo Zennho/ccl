@@ -35,6 +35,7 @@ import { createSkinController } from './lib/skin-controller.ts';
 import { createContentInstall } from './lib/content-install.ts';
 import { createGlobalSettings } from './lib/global-settings.ts';
 import { createContentControls } from './lib/content-controls.ts';
+import { createRenderCycle } from './lib/render-cycle.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -162,7 +163,6 @@ const { saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, enqueueJob, pum
   }
  }
 });
-let renderedPage = null;
 const inputController=createInputController({container:app,state,theme,render,renderSettings:renderSettingsPage,renderMods:renderLocalMods,renderPacks:renderLocalPacks,updateSearch:updateSearchResults,applyTheme,persist});
 function renderChrome() {
  renderShell();
@@ -207,24 +207,7 @@ function renderPage() {
  if(state.page==='multiplayer' && state.lanView==='servers'){renderServerPage();return;}
  renderer.page();
 }
-function render() {
- if(!inputController.beforeRender(renderedPage===state.page))return;
- const first = !app.querySelector('.app-shell');
- if (first) { renderer.mount(Shell,shellProps()); renderPage(); }
- else {
-  const content = app.querySelector('.content');
-  const same = renderedPage === state.page;
-  const main=app.querySelector('.main'),scrollTop=main?.scrollTop,scrollLeft=main?.scrollLeft,docScroll=document.scrollingElement||document.documentElement,docTop=docScroll.scrollTop,docLeft=docScroll.scrollLeft;
-  const values = same ? [...content.querySelectorAll('form input, form select')].filter(x => x.name).map(x => ({name:x.name, value:x.value, checked:x.checked, type:x.type})) : [];
-  const active = same && content.contains(document.activeElement) ? document.activeElement : null;
-  const focus = active ? { name:active.name, id:active.id, start:active.selectionStart, end:active.selectionEnd } : null;
-  renderPage();
-  for (const saved of values) { const el = [...content.querySelectorAll('form input, form select')].find(x => x.name === saved.name && x.type === saved.type); if (el) { el.value = saved.value; if (el.type === 'checkbox' || el.type === 'radio') el.checked = saved.checked; } }
-  if (focus) { const el = [...content.querySelectorAll('input, select')].find(x => focus.id ? x.id === focus.id : x.name === focus.name); if (el) { el.focus({preventScroll:true}); if (focus.start != null && typeof el.setSelectionRange === 'function') { try { el.setSelectionRange(focus.start, focus.end); } catch {} } } }
-  if(same && main){main.scrollTop=scrollTop;main.scrollLeft=scrollLeft;docScroll.scrollTop=docTop;docScroll.scrollLeft=docLeft;}
- }
- renderedPage = state.page; syncMemoryControls(); applyTheme(); renderChrome(); if(!(state.modDraft && app.querySelector("#modal-root .mod-dialog")) && !(state.archiveDraft && app.querySelector("#modal-root .archive-dialog"))) renderOverlay(); hydrateThumbnails(); refreshPreview();
-}
+function render(){renderCycle.render();}
 function renderSettingsPage() {
  renderer.page(SettingsPage,{...state,version:appVersion,selectedVersion:state.versions.find(v=>v.id===state.selected && v.installed),theme},'settings');
 }
@@ -405,6 +388,7 @@ app.addEventListener('change', async event => {
 });
 app.addEventListener('submit', async event => { if(event.target.id==='instance-settings-form') {event.preventDefault();instanceLaunch.save(event.target);return;
 } if(event.target.id==='lan-host-form'){event.preventDefault();await multiplayer.host(Number(event.target.elements.lanGamePort.value));return;} if(event.target.id==='lan-test-form'){event.preventDefault();await multiplayer.test(event.target.elements.lanTarget.value);return;} if(event.target.id==='content-form'){event.preventDefault();await contentControls.submit(event.target);return;} if(event.target.id==='settings-form'){event.preventDefault();await globalSettings.save(event.target);} });
+const renderCycle=createRenderCycle({container:app,state,beforeRender:inputController.beforeRender,mount:()=>renderer.mount(Shell,shellProps()),renderPage,syncMemory:syncMemoryControls,applyTheme,renderChrome,renderOverlay,hydrateThumbnails,refreshPreview});
 const contentControls=createContentControls({state,render,invalidateMods:modManager.invalidate,refreshMods,refreshPacks,loadCategories:loadContentCategories,search:searchContent});
 const globalSettings=createGlobalSettings({state,render,persist,flash,invalidateMods:modManager.invalidate,refresh,
  configureProxy:proxyUrl=>invoke('configure_proxy',{proxyUrl}),setIsolation:(gameDir,version,isolated)=>invoke('set_version_isolation',{gameDir,version,isolated})});

@@ -61,4 +61,5 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/content-install.ts',['createContentInstall']);
  load(window,'lib/global-settings.ts',['createGlobalSettings']);
  load(window,'lib/content-controls.ts',['createContentControls']);
+ load(window,'lib/render-cycle.ts',['createRenderCycle']);
 };
