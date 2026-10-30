@@ -19,6 +19,10 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/content-search.ts',['createContentSearch']);
  load(window,'lib/mod-manager.ts',['createModManager']);
  load(window,'lib/game-profile.ts',['createGameProfile']);
+ load(window,'lib/instance-manage.ts',['createInstanceManage']);
+ load(window,'lib/pack-manager.ts',['createPackManager']);
+ load(window,'lib/game-events.ts',['createGameEvents']);
+ load(window,'lib/system-status.ts',['createSystemStatus']);
  load(window,'react/renderer.tsx',['createRenderer']);
  load(window,'react/pages.tsx',['Icon','HomePage','VersionsPage','JavaPage']);
  load(window,'react/instance-settings.tsx',['InstanceSettingsDialog']);

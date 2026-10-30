@@ -1,9 +1,9 @@
 import React from 'react';
 import { Icon } from './pages';
 import type { GameVersion, MemoryMode } from './types';
+import type {MemoryInfo} from '../lib/system-status';
 type ThemeKey='bannerOpacity'|'bannerFrost'|'bannerBlur'|'backgroundOpacity'|'backgroundFrost'|'backgroundBlur';
 type Theme=Record<ThemeKey,number>;
-interface MemoryInfo {totalMb:number;availableMb:number;recommendedMb?:number}
 export interface SettingsProps {
  version: string; selectedVersion?:GameVersion; username:string; javaPath:string;gameDir:string;memory:number;memoryMode:MemoryMode;optimize:boolean;jvmArgs:string;gameArgs:string;proxyUrl:string;
  memoryInfo:MemoryInfo|null;memoryInfoLoading:boolean;memoryInfoError:string;theme:Theme;updateState:string;updateError:string;updateInfo:{available:boolean;latestVersion:string}|null;

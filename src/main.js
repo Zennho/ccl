@@ -13,6 +13,10 @@ import { createAccountRestorer } from './lib/account-restore.ts';
 import { createContentSearch } from './lib/content-search.ts';
 import { createModManager } from './lib/mod-manager.ts';
 import { createGameProfile } from './lib/game-profile.ts';
+import { createInstanceManage } from './lib/instance-manage.ts';
+import { createPackManager } from './lib/pack-manager.ts';
+import { createGameEvents } from './lib/game-events.ts';
+import { createSystemStatus } from './lib/system-status.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -112,18 +116,9 @@ async function restoreThemeImages() {
   catch { /* The default theme remains available when storage is unavailable. */ }
  }));
 }
-async function refreshMemoryInfo() {
- if(state.memoryInfoLoading || !isTauri()) return;
- state.memoryInfoLoading=true;state.memoryInfoError='';
- const update=()=>{if(state.page==='settings' && app.querySelector('#memory-info'))renderSettingsPage();};
- update();
- try {
-  const info=await invoke('memory_info');
-  if(!info || !Number.isFinite(info.totalMb) || !Number.isFinite(info.availableMb)) throw new Error('内存信息不可用');
-  state.memoryInfo=info;
- } catch(e) { state.memoryInfo=null;state.memoryInfoError=String(e); }
- finally {state.memoryInfoLoading=false;update();}
-}
+const systemStatus=createSystemStatus({state,isDesktop:isTauri,getMemory:()=>invoke('memory_info'),getUpdate:()=>invoke('check_launcher_update'),
+ renderMemory:()=>{if(state.page==='settings'&&app.querySelector('#memory-info'))renderSettingsPage();},renderChrome});
+const refreshMemoryInfo=systemStatus.refreshMemoryInfo,checkLauncherUpdate=systemStatus.checkLauncherUpdate;
 function syncMemoryControls() {
  const mode=app.querySelector('#memory-mode'), manual=app.querySelector('#memory-manual');
  if(mode && manual) manual.hidden=mode.value!=='manual';
@@ -223,46 +218,17 @@ const ADDONS = [
  { id:'jei', title:'Just Enough Items', desc:'查看物品与配方', loaders:['fabric','quilt','forge','neoforge'] },
  { id:'jade', title:'Jade', desc:'查看方块与实体信息', loaders:['fabric','quilt','forge','neoforge'] },
 ];
-async function checkLauncherUpdate(manual=false) {
- if(state.updateState==='checking')return;
- state.updateState='checking';state.updateError='';renderChrome();
- try {
-  const info=await invoke('check_launcher_update');
-  if(!info || typeof info.available!=='boolean' || typeof info.latestVersion!=='string')throw new Error('更新信息格式无效');
-  state.updateInfo=info;state.updateState='success';
-  if(manual && info.available)state.updateDismissed='';
- } catch(e) {state.updateState='error';state.updateError=String(e);}
- renderChrome();
-}
-
 function renderContentPage() { if(state.page==='content' && app.querySelector('.content')) { renderer.page(ContentPage,{state},'content'); hydrateThumbnails(); } }
 function renderLocalPacks() { renderContentPage(); }
-let packEpoch=0;
-async function refreshPacks() {
- const kind=state.contentKind,version=state.contentTarget,gameDir=state.gameDir,epoch=++packEpoch;
- state.localPacks=[];state.packUpdates=null;state.packError='';state.shaderEnv=null;state.shaderEnvError='';
- if(!['resourcepack','shader'].includes(kind)||!version){state.packLoading=false;state.shaderEnvLoading=false;renderLocalPacks();return;}
- state.packLoading=true;state.shaderEnvLoading=kind==='shader';renderLocalPacks();
- const current=()=>epoch===packEpoch&&kind===state.contentKind&&version===state.contentTarget&&gameDir===state.gameDir;
- const packs=invoke('list_local_packs',{gameDir,version,kind}).then(result=>{if(current())state.localPacks=Array.isArray(result)?result:[];}).catch(e=>{if(current())state.packError=String(e);}).finally(()=>{if(current()){state.packLoading=false;renderLocalPacks();}});
- const env=kind==='shader'?invoke('shader_environment',{gameDir,version}).then(result=>{if(current())state.shaderEnv=result;}).catch(e=>{if(current())state.shaderEnvError=String(e);}).finally(()=>{if(current()){state.shaderEnvLoading=false;renderLocalPacks();}}):Promise.resolve();
- await Promise.all([packs,env]);
-}
+const packManager=createPackManager({state,render:renderLocalPacks,
+ list:(gameDir,version,kind)=>invoke('list_local_packs',{gameDir,version,kind}),
+ environment:(gameDir,version)=>invoke('shader_environment',{gameDir,version})});
+const refreshPacks=packManager.refresh;
 
-async function loadManage(view=state.manageView) {
- if(!view)return;view.loading=true;view.error='';renderOverlay();
- try{const items=await invoke(view.kind==='backups'?'list_backups':'list_worlds',{gameDir:view.gameDir,version:view.version});if(state.manageView===view)view.items=Array.isArray(items)?items:[];}catch(e){if(state.manageView===view)view.error=String(e);}finally{if(state.manageView===view){view.loading=false;renderOverlay();}}
-}
-async function openManage(kind,version,gameDir=state.gameDir){
- const item=state.versions.find(v=>v.id===version&&v.installed);if(!item)return;
- const view={kind,version,gameDir,name:item.name||version,isolated:!!item.isolated,items:[],loading:true,busy:false,error:'',confirm:null};state.instanceView=null;state.manageView=view;renderOverlay();await loadManage(view);
-}
-async function manageOperation(command,args,success){
- const view=state.manageView;if(!view||view.busy)return;view.busy=true;view.error='';renderOverlay();
- try{await invoke(command,{gameDir:view.gameDir,version:view.version,...args});if(state.manageView===view){view.confirm=null;flash(success);await loadManage(view);}}
- catch(e){if(state.manageView===view)view.error=String(e);}
- finally{if(state.manageView===view){view.busy=false;renderOverlay();}}
-}
+const instanceManage=createInstanceManage({state,render:renderOverlay,flash,
+ list:(kind,gameDir,version)=>invoke(kind==='backups'?'list_backups':'list_worlds',{gameDir,version}),
+ operation:(command,args)=>invoke(command,args)});
+const loadManage=instanceManage.load,openManage=instanceManage.open,manageOperation=instanceManage.perform;
 function renderLocalMods() { renderContentPage(); }
 const modManager=createModManager({state,render:renderLocalMods,search:()=>searchContent(),flash,
  list:(gameDir,version)=>invoke('list_mods',{gameDir,version}),
@@ -559,10 +525,10 @@ app.addEventListener('click', async event => {
  if (action === 'refresh-java') await refreshJava();
  if(action==='refresh-packs') await refreshPacks();
  if(action==='open-pack-folder' && state.contentTarget) {try{await invoke('open_pack_folder',{gameDir:state.gameDir,version:state.contentTarget,kind:state.contentKind});}catch(e){flash(`无法打开文件夹：${e}`,'error');}}
- if(action==='find-shader-support') {state.contentKind='mod';state.contentQuery=event.target.closest('[data-query]')?.dataset.query||'Iris';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];packEpoch++;state.packDelete=null;const query=app.querySelector('#content-form [name=query]');if(query)query.value=state.contentQuery;render();await searchContent();}
+ if(action==='find-shader-support') {state.contentKind='mod';state.contentQuery=event.target.closest('[data-query]')?.dataset.query||'Iris';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];packManager.invalidate();state.packDelete=null;const query=app.querySelector('#content-form [name=query]');if(query)query.value=state.contentQuery;render();await searchContent();}
  if(action==='cancel-pack-remove') {state.packDelete=null;render();}
  if(action==='confirm-pack-remove' && state.packDelete && !state.packWorking) {const item=state.packDelete;state.packDelete=null;state.packWorking=true;render();try{await invoke('remove_local_pack',item);flash('资源包已删除。');if(item.version===state.contentTarget&&item.gameDir===state.gameDir&&item.kind===state.contentKind){await refreshPacks();contentSearch.invalidate();state.contentLoaded=false;await searchContent();}}catch(e){flash(`删除失败：${e}`,'error');}finally{state.packWorking=false;if(state.page==='content')render();}}
- if(action==='check-pack-updates' && !state.packChecking && !state.packWorking && state.contentTarget) {const version=state.contentTarget,gameDir=state.gameDir,kind=state.contentKind,epoch=packEpoch;state.contentKey=String(app.querySelector('#content-form [name=apiKey]')?.value || state.contentKey).trim();state.packChecking=true;state.packUpdates=null;renderLocalPacks();try{const result=await invoke('check_pack_updates',{gameDir,version,kind,apiKey:state.contentKey});if(epoch===packEpoch && version===state.contentTarget && gameDir===state.gameDir && kind===state.contentKind)state.packUpdates=result;}catch(e){flash(`检查更新失败：${e}`,'error');}finally{state.packChecking=false;renderLocalPacks();}}
+ if(action==='check-pack-updates' && !state.packChecking && !state.packWorking && state.contentTarget) {const version=state.contentTarget,gameDir=state.gameDir,kind=state.contentKind,epoch=packManager.revision();state.contentKey=String(app.querySelector('#content-form [name=apiKey]')?.value || state.contentKey).trim();state.packChecking=true;state.packUpdates=null;renderLocalPacks();try{const result=await invoke('check_pack_updates',{gameDir,version,kind,apiKey:state.contentKey});if(epoch===packManager.revision() && version===state.contentTarget && gameDir===state.gameDir && kind===state.contentKind)state.packUpdates=result;}catch(e){flash(`检查更新失败：${e}`,'error');}finally{state.packChecking=false;renderLocalPacks();}}
 
  if (action === 'cancel-mod-remove') { state.modDelete = null; render(); }
  if (action === 'confirm-mod-remove') { const names=state.modDelete || [];state.modDelete=null;render();await applyModChanges('delete',names); }
@@ -626,6 +592,7 @@ app.addEventListener('submit', async event => { if(event.target.id==='instance-s
  if(overrideJava||overrideMemory||overrideArgs)instanceLaunchSettings[key]={overrideJava,overrideMemory,overrideArgs,javaPath:javaPath||state.javaPath,memory:Number.isInteger(memory)&&memory>=512&&memory<=32768?memory:state.memory,memoryMode,optimize:form.elements.optimize.checked,jvmArgs:form.elements.jvmArgs.value,gameArgs:form.elements.gameArgs.value};else delete instanceLaunchSettings[key];
  try{localStorage.setItem('ccl-instance-launch-settings',JSON.stringify(instanceLaunchSettings));state.instanceSettingsView=null;renderOverlay();flash('实例启动设置已保存。');}catch(e){if(previous)instanceLaunchSettings[key]=previous;else delete instanceLaunchSettings[key];flash(`无法保存实例设置：${e}`,'error');}return;
 } if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentSort=data.get('sort');state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey);state.contentCategory=String(data.get('category')||state.contentCategory);state.contentGameFilter=String(data.get('gameFilter')||'').trim();state.contentLoaderFilter=String(data.get('loaderFilter')||'');state.contentEnvironment=String(data.get('environment')||'');state.contentPage=0;state.contentHasMore=false;void loadContentCategories(); await searchContent(true); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; const selectedVersion=state.versions.find(v=>v.id===state.selected && v.installed),isolationControl=event.target.querySelector('#version-isolation'),isolationChanged=selectedVersion && isolationControl && !isolationControl.disabled && isolationControl.checked!==!!selectedVersion.isolated; if(isolationChanged && state.gameDir!==data.get('gameDir').trim()) {flash('请先保存游戏目录，再修改版本隔离。','error');return;} if(isolationChanged && state.jobs.some(j=>j.gameDir===state.gameDir && ['queued','running','canceling'].includes(j.status))) {flash('该游戏目录有进行中或等待中的任务，请先取消或等待结束。','error');return;} try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } if(isolationChanged) { try { await invoke('set_version_isolation',{gameDir:state.gameDir,version:selectedVersion.id,isolated:isolationControl.checked});selectedVersion.isolated=isolationControl.checked;state.localMods=[];state.contentResults=[];state.contentLoaded=false;state.modUpdates=null;state.selectedMods.clear();modManager.invalidate(); } catch(e) {flash(`无法修改版本隔离：${e}`,'error');return;} } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory') ?? state.memory), memoryMode:data.get('memoryMode')==='auto'?'auto':'manual', optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); if(changed){state.selectedMods.clear();state.modUpdates=null;state.modConflicts=null;modManager.invalidate();} render(); flash('设置已保存。'); if (changed) await refresh(); });
+const gameEvents=createGameEvents({state,render,renderOverlay,showCrash:showCrashNotice,refreshStats:gameProfile.loadStats});
 const restoreAccount=createAccountRestorer({state,restore:()=>invoke('restore_microsoft_account'),restoreAvatar:restoreOnlineAvatar,refreshAppearance:()=>refreshAppearance({reuse:true}),render,persist,flash});
 async function init() {
  updateDefaultBanner();
@@ -634,6 +601,6 @@ async function init() {
  restoreJobs();render();
  restoreThemeImages();void restoreLocalSkin();if(usingOnlineAccount())void restoreOnlineAvatar(state.accountUuid);
  if (!isTauri()) { state.notice = '请在 Tauri 桌面应用中使用启动器。'; state.noticeKind = 'error'; render(); return; }
- try { await invoke('configure_proxy', { proxyUrl: state.proxyUrl }); if (!state.gameDir) state.gameDir = await invoke('default_game_dir'); await listen('java-progress', e => jobEvent(e.payload)); await listen('install-progress', e => jobEvent(e.payload)); await listen('game-window-ready', e => {const view=state.launchView;if(view && view.phase!=='failed' && e.payload.launchId===view.id){state.launchView=null;state.page='home';render();}}); await listen('game-window-status', e => {const view=state.launchView;if(view && view.phase!=='failed' && e.payload.launchId===view.id){view.warning=e.payload.status==='unavailable'?'当前桌面暂时无法确认游戏窗口；窗口出现后可手动返回主页。':'等待时间较长，可查看启动日志或手动返回主页。';renderOverlay();}}); await listen('game-exit', e => { const payload=e.payload || {},view=state.launchView,profile=state.profileView;if(profile && profile.version===payload.version && profile.gameDir===payload.gameDir)void gameProfile.loadStats(profile);const sameLaunch=view && (payload.launchId ? view.id===payload.launchId : view.version===payload.version);if(!payload.success || sameLaunch) {const crash={version:payload.version,gameDir:payload.gameDir,logName:typeof payload.logPath==='string'?payload.logPath.split(/[\\/]/).pop():null,code:payload.code,diagnosis:payload.success?null:payload.diagnosis};if(sameLaunch){view.crash=crash;view.phase='failed';view.error=payload.success?'游戏进程已退出，未检测到游戏窗口。可以打开启动日志查看详情。':`游戏异常退出（代码 ${payload.code ?? '未知'}），可以打开启动日志查看详情。`;renderOverlay();}else if(!payload.success)showCrashNotice(crash);}  }); void checkLauncherUpdate();window.setInterval(()=>void checkLauncherUpdate(),6*60*60*1000);if(usingOnlineAccount())void restoreAccount({notify:false}); await refresh(); } catch (e) { state.accountRestoring=false;render();flash(String(e), 'error'); }
+ try { await invoke('configure_proxy', { proxyUrl: state.proxyUrl }); if (!state.gameDir) state.gameDir = await invoke('default_game_dir'); await listen('java-progress', e => jobEvent(e.payload)); await listen('install-progress', e => jobEvent(e.payload)); await listen('game-window-ready',e=>gameEvents.windowReady(e.payload)); await listen('game-window-status',e=>gameEvents.windowStatus(e.payload)); await listen('game-exit',e=>gameEvents.exit(e.payload || {})); void checkLauncherUpdate();window.setInterval(()=>void checkLauncherUpdate(),6*60*60*1000);if(usingOnlineAccount())void restoreAccount({notify:false}); await refresh(); } catch (e) { state.accountRestoring=false;render();flash(String(e), 'error'); }
 }
 init();

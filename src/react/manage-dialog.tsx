@@ -1,7 +1,6 @@
 import React from 'react';
 import {Icon} from './pages';
-interface ManageItem {scope?:string;world?:string;created?:number;size?:number;name?:string;folder?:string;gameVersion?:string;lastPlayed?:number;metadataError?:boolean}
-interface ManageView {kind:'backups'|'worlds';name:string;isolated:boolean;items:ManageItem[];loading:boolean;busy:boolean;error:string;confirm:{action:'restore'|'delete'}|null}
+import type {ManageView} from '../lib/instance-manage';
 export function ManageDialog({view:d}:{view:ManageView}) {
  const backups=d.kind==='backups',label=backups?'备份与恢复':'存档管理';
  const date=(value?:number)=>{if(!value)return '时间未知';const n=Number(value);return Number.isFinite(n)?new Date(backups?n*1000:n).toLocaleString():'时间未知';};
