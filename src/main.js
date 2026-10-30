@@ -28,6 +28,7 @@ import { createAppearanceController } from './lib/appearance-controller.ts';
 import { createContentDetail } from './lib/content-detail.ts';
 import { createGameLauncher } from './lib/game-launcher.ts';
 import { createAccountActions } from './lib/account-actions.ts';
+import { createInstanceLaunchSettings } from './lib/instance-launch-settings.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -46,7 +47,6 @@ import { GameProfileDialog } from './react/game-profile.tsx';
 import { ContentPage } from './react/content.tsx';
 import { ContentDialog } from './react/content-dialog.tsx';
 import { Shell } from './react/shell.tsx';
-import { normalizeInstanceSettings, resolveInstanceSettings } from './react/instance-settings-model.ts';
 import { version as appVersion } from '../package.json';
 import { open as openDialog, save as saveDialog } from '@tauri-apps/plugin-dialog';
 import { invoke, isTauri } from '@tauri-apps/api/core';
@@ -60,14 +60,8 @@ const app = document.querySelector('#app');
 const renderer = createRenderer(app);
 let offlineSkinInstances={};
 try { const value=JSON.parse(localStorage.getItem('ccl-offline-skin-instances')||'{}');if(value && typeof value==='object' && !Array.isArray(value))offlineSkinInstances=value; } catch {}
-let instanceLaunchSettings={};
-try { const value=JSON.parse(localStorage.getItem('ccl-instance-launch-settings')||'{}');if(value && typeof value==='object' && !Array.isArray(value))instanceLaunchSettings=value; } catch {}
-function getLaunchSettings(gameDir,version) {
- return normalizeInstanceSettings(instanceLaunchSettings[instanceKey(gameDir,version)]);
-}
-function effectiveLaunchSettings(gameDir,version) {
- return resolveInstanceSettings(state,getLaunchSettings(gameDir,version));
-}
+const instanceLaunch=createInstanceLaunchSettings({state,storage:localStorage,render:renderOverlay,flash});
+const getLaunchSettings=instanceLaunch.get,effectiveLaunchSettings=instanceLaunch.effective;
 
 const instanceTheme=createInstanceTheme({state,storage:localStorage,store:imageStore,validate:validateThemeImage,render,renderOverlay,applyTheme,flash});
 const getInstanceTheme=instanceTheme.getTheme,loadInstanceCover=instanceTheme.load,loadInstalledCovers=instanceTheme.loadInstalled;
@@ -334,7 +328,7 @@ app.addEventListener('click', async event => {
  const previewCape=event.target.closest('[data-preview-cape]'); if(previewCape) { const cape=state.appearance?.capes[Number(previewCape.dataset.previewCape)];if(cape) {state.previewCapeId=cape.id;state.localCape=null;render();}return; }
  const applyCape=event.target.closest('[data-apply-cape]'); if(applyCape && state.account) { const cape=state.appearance?.capes[Number(applyCape.dataset.applyCape)];if(!cape)return;state.accountBusy=true;render();try { await invoke('set_account_cape',{capeId:cape.id});state.localCape=null;await refreshAppearance();flash('已更新账户披风。'); } catch(e) { flash(`更新披风失败：${e}`,'error'); } state.accountBusy=false;render();return; }
  if(action==='close-instance-settings'){state.instanceSettingsView=null;renderOverlay();return;}
- if(action==='reset-instance-settings' && state.instanceSettingsView) {const view=state.instanceSettingsView,key=instanceKey(view.gameDir,view.version),previous=instanceLaunchSettings[key];delete instanceLaunchSettings[key];try{localStorage.setItem('ccl-instance-launch-settings',JSON.stringify(instanceLaunchSettings));state.instanceSettingsView=null;renderOverlay();flash('此实例已恢复使用全局设置。');}catch(e){if(previous)instanceLaunchSettings[key]=previous;flash(`无法保存实例设置：${e}`,'error');}return;}
+ if(action==='reset-instance-settings'){instanceLaunch.reset();return;}
  if(action==='check-update') {void checkLauncherUpdate(true);return;}
  if(action==='open-update') {try {await invoke('open_launcher_releases');}catch(e){flash(`无法打开下载页面：${e}`,'error');}return;}
  if(action==='dismiss-update') {state.updateDismissed=state.updateInfo?.latestVersion||'';renderChrome();return;}
@@ -405,15 +399,7 @@ app.addEventListener('change', async event => {
  if (event.target.closest('#content-form') && ['source','kind','sort','category','loaderFilter','environment'].includes(event.target.name)) { const form=event.target.closest('form'); const data=new FormData(form);const changedSource=state.contentSource!==data.get('source'),changedKind=state.contentKind!==data.get('kind'); state.contentSource=data.get('source'); state.contentKind=data.get('kind'); state.contentSort=data.get('sort');state.contentQuery=String(data.get('query') || '').trim();state.contentKey=String(data.get('apiKey') || state.contentKey);state.contentCategory=changedSource||changedKind?'':String(data.get('category')||'');state.contentGameFilter=String(data.get('gameFilter')||state.contentGameFilter).trim();state.contentLoaderFilter=String(data.get('loaderFilter')||'');state.contentEnvironment=state.contentSource==='modrinth'?String(data.get('environment')||''):'';state.contentResults=[];state.contentPage=0;state.contentHasMore=false;state.contentLoaded=false;state.contentError='';state.packDelete=null;if(changedSource||changedKind)state.contentCategories=[];render();if(changedSource||changedKind)void loadContentCategories();await Promise.all([refreshPacks(),searchContent()]); }
 
 });
-app.addEventListener('submit', async event => { if(event.target.id==='instance-settings-form') {
- event.preventDefault();const form=event.target,view=state.instanceSettingsView;if(!view)return;
- if(view.gameDir!==state.gameDir || !state.versions.some(v=>v.id===view.version && v.installed)){flash('实例已变更或不存在，请重新打开设置。','error');return;}
- const overrideJava=form.elements.overrideJava.checked,overrideMemory=form.elements.overrideMemory.checked,overrideArgs=form.elements.overrideArgs.checked;
- const javaPath=form.elements.javaPath.value.trim(),memory=Number(form.elements.memory.value),memoryMode=form.elements.memoryMode.value==='manual'?'manual':'auto';
- if((overrideJava && !javaPath) || (overrideMemory && memoryMode==='manual' && (!Number.isInteger(memory)||memory<512||memory>32768))){flash('请填写有效的 Java 路径和内存上限。','error');return;}
- const key=instanceKey(view.gameDir,view.version),previous=instanceLaunchSettings[key];
- if(overrideJava||overrideMemory||overrideArgs)instanceLaunchSettings[key]={overrideJava,overrideMemory,overrideArgs,javaPath:javaPath||state.javaPath,memory:Number.isInteger(memory)&&memory>=512&&memory<=32768?memory:state.memory,memoryMode,optimize:form.elements.optimize.checked,jvmArgs:form.elements.jvmArgs.value,gameArgs:form.elements.gameArgs.value};else delete instanceLaunchSettings[key];
- try{localStorage.setItem('ccl-instance-launch-settings',JSON.stringify(instanceLaunchSettings));state.instanceSettingsView=null;renderOverlay();flash('实例启动设置已保存。');}catch(e){if(previous)instanceLaunchSettings[key]=previous;else delete instanceLaunchSettings[key];flash(`无法保存实例设置：${e}`,'error');}return;
+app.addEventListener('submit', async event => { if(event.target.id==='instance-settings-form') {event.preventDefault();instanceLaunch.save(event.target);return;
 } if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentSort=data.get('sort');state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey);state.contentCategory=String(data.get('category')||state.contentCategory);state.contentGameFilter=String(data.get('gameFilter')||'').trim();state.contentLoaderFilter=String(data.get('loaderFilter')||'');state.contentEnvironment=String(data.get('environment')||'');state.contentPage=0;state.contentHasMore=false;void loadContentCategories(); await searchContent(true); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; const selectedVersion=state.versions.find(v=>v.id===state.selected && v.installed),isolationControl=event.target.querySelector('#version-isolation'),isolationChanged=selectedVersion && isolationControl && !isolationControl.disabled && isolationControl.checked!==!!selectedVersion.isolated; if(isolationChanged && state.gameDir!==data.get('gameDir').trim()) {flash('请先保存游戏目录，再修改版本隔离。','error');return;} if(isolationChanged && state.jobs.some(j=>j.gameDir===state.gameDir && ['queued','running','canceling'].includes(j.status))) {flash('该游戏目录有进行中或等待中的任务，请先取消或等待结束。','error');return;} try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } if(isolationChanged) { try { await invoke('set_version_isolation',{gameDir:state.gameDir,version:selectedVersion.id,isolated:isolationControl.checked});selectedVersion.isolated=isolationControl.checked;state.localMods=[];state.contentResults=[];state.contentLoaded=false;state.modUpdates=null;state.selectedMods.clear();modManager.invalidate(); } catch(e) {flash(`无法修改版本隔离：${e}`,'error');return;} } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory') ?? state.memory), memoryMode:data.get('memoryMode')==='auto'?'auto':'manual', optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); if(changed){state.selectedMods.clear();state.modUpdates=null;state.modConflicts=null;modManager.invalidate();} render(); flash('设置已保存。'); if (changed) await refresh(); });
 const gameEvents=createGameEvents({state,render,renderOverlay,showCrash:showCrashNotice,refreshStats:gameProfile.loadStats});
 const restoreAccount=createAccountRestorer({state,restore:()=>invoke('restore_microsoft_account'),restoreAvatar:restoreOnlineAvatar,refreshAppearance:()=>refreshAppearance({reuse:true}),render,persist,flash});

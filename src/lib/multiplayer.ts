@@ -1,6 +1,7 @@
 import type {PublicServer,ServerCatalog} from '../react/public-servers';
-interface State {page:string;lanAddresses:string[];serverCatalog:ServerCatalog|null;serverQuery:string;serverStatus:string;serverLoading:boolean;serverError:string;serverPage:number}
-interface Options {state:State;render:()=>void;flash:(message:string,kind?:string)=>void;getAddresses:()=>Promise<string[]>;getServers:()=>Promise<ServerCatalog>}
+import type {NetworkAddress} from '../react/lan-room';
+interface State {page:string;lanAddresses:NetworkAddress[];serverCatalog:ServerCatalog|null;serverQuery:string;serverStatus:string;serverLoading:boolean;serverError:string;serverPage:number}
+interface Options {state:State;render:()=>void;flash:(message:string,kind?:string)=>void;getAddresses:()=>Promise<NetworkAddress[]>;getServers:()=>Promise<ServerCatalog>}
 export async function copyText(value:string) {
  if(navigator.clipboard?.writeText)return navigator.clipboard.writeText(value);
  const input=document.createElement('textarea');input.value=value;input.style.position='fixed';input.style.opacity='0';document.body.appendChild(input);input.select();

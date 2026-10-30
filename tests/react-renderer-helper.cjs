@@ -54,4 +54,5 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/content-dialog.tsx',['ContentDialog']);
  load(window,'react/shell.tsx',['Shell']);
  load(window,'react/instance-settings-model.ts',['normalizeInstanceSettings','resolveInstanceSettings']);
+ load(window,'lib/instance-launch-settings.ts',['createInstanceLaunchSettings']);
 };
