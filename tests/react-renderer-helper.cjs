@@ -4,7 +4,7 @@ const { transformSync }=require('esbuild');
 function load(window, filename, exports) {
  const input=fs.readFileSync(path.join(__dirname,'../src',filename),'utf8');
  const output=transformSync(input,{loader:filename.endsWith('.tsx')?'tsx':'ts',jsx:'transform',format:'esm',target:'es2022'}).code
-  .replace(/^import .*;\r?\n/gm,'').replace(/export\s*\{[^}]*\};/g,'');
+  .replace(/^import\s+(?:[^;]*?\s+from\s+)?['"][^'"]+['"];\r?\n/gm,'').replace(/export\s*\{[^}]*\};/g,'');
  window.eval(`(function(){${output}\n${exports.map(name=>`window.${name}=${name};`).join('')}\n})()`);
 }
 module.exports=function installReactRenderer(window) {
@@ -76,6 +76,12 @@ module.exports=function installReactRenderer(window) {
  load(window,'app/form-events.ts',['installFormEvents']);
  load(window,'app/startup.ts',['startApplication']);
  load(window,'app/click-dispatcher.ts',['installClickDispatcher']);
+ load(window,'app/install-addons.ts',['installAddons']);
+ load(window,'app/features/account.ts',['createAccountFeature']);
+ load(window,'app/features/content.ts',['createContentFeature']);
+ load(window,'app/features/instances.ts',['createInstanceFeature']);
+ load(window,'app/view.ts',['createApplicationView']);
+ load(window,'app/events.ts',['installApplicationEvents']);
 };
 
 // Load the actual TypeScript entry in strict mode for browser integration tests.
@@ -83,7 +89,7 @@ module.exports.runMain = function runMain(window, { exposeInternals = false } = 
  const source = filename => fs.readFileSync(path.join(__dirname,'../src',filename),'utf8');
  const jobManager = transformSync(source('job-manager.ts'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,'');
  window.eval(jobManager);
- const main = transformSync(source('main.ts'),{loader:'ts',format:'esm',target:'es2022'}).code.replace(/^import .*;\r?\n/gm,'');
- const hooks = exposeInternals ? 'window.__cclTest={restoreJobs,bannerPeriod};window.restoreThemeImages=restoreThemeImages;' : '';
- window.eval(`"use strict";\n${main}\nwindow.render=render;window.refreshMods=refreshMods;${hooks}`);
+ const main = transformSync(source('main.ts'),{loader:'ts',format:'esm',target:'es2022'}).code.replace(/^import\s+(?:[^;]*?\s+from\s+)?['"][^'"]+['"];\r?\n/gm,'');
+ const hooks = exposeInternals ? 'window.__cclTest={restoreJobs:jobs.restoreJobs,bannerPeriod};window.restoreThemeImages=appearance.restore;' : '';
+ window.eval(`"use strict";\n${main}\nwindow.render=render;window.refreshMods=content.mods.refreshMods;${hooks}`);
 };
