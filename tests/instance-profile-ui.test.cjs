@@ -5,6 +5,7 @@ const path=require('node:path');
 const {JSDOM}=require('jsdom');
 const {indexedDB}=require('fake-indexeddb');
 const tick=()=>new Promise(r=>setTimeout(r,12));
+async function waitFor(predicate, message) { const deadline=Date.now()+3000;while(!predicate()&&Date.now()<deadline)await tick();assert.ok(predicate(),message); }
 function boot(){
  const dom=new JSDOM('<div id="app"></div>',{url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});const w=dom.window,calls=[];let statsResolve,objectCounter=0;require('./react-renderer-helper.cjs')(w);
  w.indexedDB=indexedDB;w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:'one',gameDir:'/profile-game'}));w.setInterval=()=>0;w.__icons={};w.createIcons=()=>{};w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};w.openDialog=async()=>null;w.saveDialog=async()=>null;
@@ -15,12 +16,12 @@ function boot(){
 }
 test('instance themes save cover and description per game version and fall back on switch',async()=>{
  const app=boot();try{await tick();app.click('[data-page=versions]');app.click('[data-instance-theme=one]');await tick();
- const input=app.w.document.querySelector('[data-instance-cover]');Object.defineProperty(input,'files',{configurable:true,value:[new app.w.File(['test'],'cover.png',{type:'image/png'})]});input.dispatchEvent(new app.w.Event('change',{bubbles:true}));await tick();
- const description=app.w.document.querySelector('#instance-description');description.value='我的冒险';description.dispatchEvent(new app.w.Event('input',{bubbles:true}));app.click('[data-instance-color="#6d91a3"]');app.click('[data-action=save-instance-theme]');await tick();await tick();
+ const input=app.w.document.querySelector('[data-instance-cover]');Object.defineProperty(input,'files',{configurable:true,value:[new app.w.File(['test'],'cover.png',{type:'image/png'})]});input.dispatchEvent(new app.w.Event('change',{bubbles:true}));await waitFor(()=>!!app.w.document.querySelector('.instance-theme-preview img'),'主题封面应完成加载');
+ const description=app.w.document.querySelector('#instance-description');description.value='我的冒险';description.dispatchEvent(new app.w.Event('input',{bubbles:true}));app.click('[data-instance-color="#6d91a3"]');app.click('[data-action=save-instance-theme]');await waitFor(()=>!app.w.document.querySelector('.instance-theme-dialog'),'主题应完成保存');
  const settings=JSON.parse(app.w.localStorage.getItem('ccl-instance-themes'));assert.equal(settings['["/profile-game","one"]'].description,'我的冒险');assert.equal(settings['["/profile-game","one"]'].color,'#6d91a3');assert.ok(settings['["/profile-game","one"]'].hasCover);
  app.click('[data-page=home]');assert.match(app.w.document.querySelector('.launch-panel').textContent,/我的冒险/);assert.match(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-image'),/blob:test/);
  app.click('[data-page=versions]');app.click('[data-select=two]');assert.equal(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-image'),'var(--ccl-default-banner)');app.click('[data-select=one]');assert.match(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-image'),/blob:test/);
- app.click('[data-instance-theme=one]');await tick();app.click('[data-action=remove-instance-cover]');app.click('[data-action=save-instance-theme]');await tick();await tick();assert.equal(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-image'),'var(--ccl-default-banner)');
+ app.click('[data-instance-theme=one]');await tick();app.click('[data-action=remove-instance-cover]');app.click('[data-action=save-instance-theme]');await waitFor(()=>!app.w.document.querySelector('.instance-theme-dialog'),'主题应完成保存');assert.equal(app.w.document.documentElement.style.getPropertyValue('--ccl-banner-image'),'var(--ccl-default-banner)');
  }finally{app.close();}
 });
 test('game profile loads screenshots and stats independently, pages and previews',async()=>{

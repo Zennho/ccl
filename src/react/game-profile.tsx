@@ -1,7 +1,6 @@
 import React from 'react';
 import {Icon} from './pages';
-interface Stats {seconds?:number;launches?:number;lastStarted?:number;lastDuration?:number|null}
-interface ProfileView {name:string;isolated:boolean;stats:Stats|null;statsError:string;loading:boolean;error:string;shots:{name:string}[];images:Record<string,string>;imageErrors:Record<string,boolean>;page:number;hasMore:boolean;preview:{data:string;name:string}|null}
+import type {ProfileView} from '../lib/game-profile';
 function playTime(seconds?:number|null){const minutes=Math.floor(Math.max(0,Number(seconds)||0)/60),hours=Math.floor(minutes/60);return hours?`${hours} 小时 ${minutes%60} 分钟`:`${minutes} 分钟`;}
 function date(value?:number){const n=Number(value);return value&&Number.isFinite(n)?new Date(n*1000).toLocaleString():'暂无记录';}
 export function GameProfileDialog({view:d}:{view:ProfileView}) {
