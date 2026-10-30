@@ -6,6 +6,7 @@ import { createModManager } from '../../lib/mod-manager';
 import { createContentSearch } from '../../lib/content-search';
 import { createContentDetail } from '../../lib/content-detail';
 import { createContentControls } from '../../lib/content-controls';
+import { createLocalModDetail } from '../../lib/local-mod-detail';
 
 interface Options {
   state: LauncherState;
@@ -80,6 +81,17 @@ export function createContentFeature({
     translate: (source, projectId, description, summary) =>
       invoke('translate_content', { source, projectId, description, summary }),
   });
+  const localModDetail = createLocalModDetail({
+    state,
+    render: renderOverlay,
+    resolve: (gameDir, version, name) =>
+      invoke('resolve_local_mod_project', { gameDir, version, name }),
+    links: (source, projectId, apiKey) => invoke('content_links', { source, projectId, apiKey }),
+    curseDescription: (projectId, apiKey) =>
+      invoke('curseforge_description', { projectId, apiKey }),
+    translate: (source, projectId, description, summary) =>
+      invoke('translate_content', { source, projectId, description, summary }),
+  });
   const contentControls = createContentControls({
     state,
     render,
@@ -124,6 +136,7 @@ export function createContentFeature({
     packs: packManager,
     search: contentSearch,
     detail: contentDetail,
+    localModDetail,
     controls: contentControls,
     onJobFinished,
   };

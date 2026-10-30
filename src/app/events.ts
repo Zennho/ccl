@@ -110,6 +110,8 @@ export function installApplicationEvents({
     flash,
     search: content.search.searchContent,
     install: contentInstall,
+    localModDetail: content.localModDetail,
+    detail: content.detail,
     mods: content.mods,
     packs: content.packs,
   });

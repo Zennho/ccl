@@ -5,6 +5,8 @@ export interface GameVersion {
   released?: string;
   installed: boolean;
   official?: boolean;
+  projectSource?: string | null;
+  projectId?: string | null;
   isolated?: boolean;
   hasInstanceData?: boolean;
 }

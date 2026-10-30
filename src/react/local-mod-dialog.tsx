@@ -1,8 +1,9 @@
 import React from 'react';
 import { Icon } from './icons';
-import type { LocalMod } from './types';
+import { ProjectDescription } from './content-dialog';
+import type { LocalModDetail } from '../lib/local-mod-detail';
 
-export function LocalModDialog({ mod }: { mod: LocalMod }) {
+export function LocalModDialog({ mod }: { mod: LocalModDetail }) {
   return (
     <div className="install-overlay" data-action="close-local-mod-backdrop">
       <section
@@ -46,16 +47,19 @@ export function LocalModDialog({ mod }: { mod: LocalMod }) {
             {mod.modId && <p>模组 ID：{mod.modId}</p>}
           </div>
         </div>
-        <section className="project-description">
-          <div className="project-description-head">
-            <strong>模组介绍</strong>
-          </div>
-          {mod.description ? (
-            <div className="project-description-text">{mod.description}</div>
-          ) : (
-            <p>此模组没有提供本地介绍。</p>
-          )}
-        </section>
+        <ProjectDescription
+          draft={{
+            description: mod.descriptionText,
+            summary: '',
+            encyclopedia: null,
+            translation: mod.translation,
+            showOriginal: mod.showOriginal,
+            descriptionLoading: mod.descriptionLoading,
+            translationLoading: mod.translationLoading,
+            descriptionError: mod.descriptionError,
+          }}
+        />
+        {mod.sourceMessage && <p className="local-mod-translation-status">{mod.sourceMessage}</p>}
         {mod.website && (
           <div className="project-links">
             <strong>相关网址</strong>

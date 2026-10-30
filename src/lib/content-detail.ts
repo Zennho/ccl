@@ -41,6 +41,7 @@ export interface ContentDraft {
   translationLoading: boolean;
   showOriginal: boolean;
   encyclopedia: { url: string; summary?: string } | null;
+  detailOnly: boolean;
 }
 interface State {
   modDraft: ContentDraft | null;
@@ -64,7 +65,7 @@ interface Options {
     source: string,
     projectId: string,
     apiKey: string,
-  ) => Promise<{ links?: ContentLink[]; description?: string }>;
+  ) => Promise<{ links?: ContentLink[]; description?: string; summary?: string }>;
   curseDescription: (projectId: string, apiKey: string) => Promise<unknown>;
   versions: (
     kind: string,
@@ -90,9 +91,12 @@ export function createContentDetail({
   versions,
   translate,
 }: Options) {
-  async function open(item: ContentHit) {
-    const kind = state.contentKind,
-      source = state.contentSource,
+  async function open(
+    item: ContentHit,
+    options?: { kind: string; source: string; detailOnly?: boolean },
+  ) {
+    const kind = options?.kind || state.contentKind,
+      source = options?.source || state.contentSource,
       apiKey = state.contentKey,
       gameDir = state.gameDir,
       target = state.contentTarget,
@@ -109,7 +113,7 @@ export function createContentDetail({
       gameDir,
       target,
       javaPath,
-      loading: kind !== 'modpack',
+      loading: kind !== 'modpack' && !options?.detailOnly,
       versions: [],
       error: '',
       links: [],
@@ -123,6 +127,7 @@ export function createContentDetail({
       translationLoading: true,
       showOriginal: false,
       encyclopedia: null,
+      detailOnly: !!options?.detailOnly,
     };
     state.modDraft = draft;
     render();
@@ -140,6 +145,7 @@ export function createContentDetail({
         if (state.modDraft === draft) {
           draft.links = Array.isArray(info?.links) ? info.links : [];
           draft.linksLoading = false;
+          if (!draft.summary && typeof info?.summary === 'string') draft.summary = info.summary;
           if (source === 'modrinth') {
             draft.description = typeof info?.description === 'string' ? info.description : '';
             draft.descriptionLoading = false;
@@ -177,7 +183,7 @@ export function createContentDetail({
             })
         : Promise.resolve();
     const versionRequest =
-      kind !== 'modpack'
+      kind !== 'modpack' && !options?.detailOnly
         ? versions(kind, gameDir, target, source, item.id, apiKey)
             .then((result) => {
               if (state.modDraft === draft) {

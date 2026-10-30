@@ -3,6 +3,8 @@ import type { LauncherState } from '../../lib/launcher-state';
 import type { createContentInstall } from '../../lib/content-install';
 import type { createModManager } from '../../lib/mod-manager';
 import type { createPackManager } from '../../lib/pack-manager';
+import type { createLocalModDetail } from '../../lib/local-mod-detail';
+import type { createContentDetail } from '../../lib/content-detail';
 import type { ClickHandler } from './types';
 interface Options {
   container: HTMLElement;
@@ -13,6 +15,8 @@ interface Options {
   flash: (message: string, kind?: string) => void;
   search: (force?: boolean) => Promise<unknown>;
   install: ReturnType<typeof createContentInstall>;
+  localModDetail: ReturnType<typeof createLocalModDetail>;
+  detail: ReturnType<typeof createContentDetail>;
   mods: ReturnType<typeof createModManager>;
   packs: ReturnType<typeof createPackManager>;
 }
@@ -25,6 +29,8 @@ export function createContentHandler({
   flash,
   search,
   install,
+  localModDetail,
+  detail,
   mods,
   packs,
 }: Options): ClickHandler {
@@ -83,14 +89,53 @@ export function createContentHandler({
       }
       return true;
     }
+    const localPack = target.closest<HTMLElement>('[data-local-pack-details]');
+    if (localPack) {
+      const pack = state.localPacks[Number(localPack.dataset.localPackDetails)];
+      if (pack?.source && pack.projectId) {
+        const kind = state.contentKind;
+        return detail.open(
+          {
+            id: pack.projectId,
+            title: pack.name,
+            installed: true,
+            projectUrl:
+              pack.source === 'modrinth'
+                ? `https://modrinth.com/${kind}/${pack.projectId}`
+                : undefined,
+          },
+          { source: pack.source, kind, detailOnly: true },
+        );
+      }
+      return true;
+    }
+    const installedPack = target.closest<HTMLElement>('[data-installed-pack-details]');
+    if (installedPack) {
+      const pack = state.versions.find(
+        (version) =>
+          version.id === installedPack.dataset.installedPackDetails &&
+          version.installed &&
+          version.kind === '整合包',
+      );
+      if (pack?.projectSource && pack.projectId)
+        return detail.open(
+          {
+            id: pack.projectId,
+            title: pack.name || pack.id,
+            installed: true,
+            projectUrl:
+              pack.projectSource === 'modrinth'
+                ? `https://modrinth.com/modpack/${pack.projectId}`
+                : undefined,
+          },
+          { source: pack.projectSource, kind: 'modpack', detailOnly: true },
+        );
+      return true;
+    }
     const localDetails = target.closest<HTMLElement>('[data-local-mod-details]');
     if (localDetails) {
       const mod = state.localMods[Number(localDetails.dataset.localModDetails)];
-      if (mod) {
-        state.localModDetail = mod;
-        renderOverlay();
-      }
-      return true;
+      return mod ? localModDetail.open(mod) : true;
     }
     const modToggle = target.closest<HTMLElement>('[data-mod-toggle]');
     if (modToggle && !state.contentBusy && !state.modWorking) {
@@ -119,7 +164,10 @@ export function createContentHandler({
         }
         return true;
       case 'toggle-content-language':
-        if (state.modDraft) {
+        if (state.localModDetail) {
+          state.localModDetail.showOriginal = !state.localModDetail.showOriginal;
+          renderOverlay();
+        } else if (state.modDraft) {
           state.modDraft.showOriginal = !state.modDraft.showOriginal;
           renderOverlay();
         }

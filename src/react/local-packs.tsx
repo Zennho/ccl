@@ -104,6 +104,11 @@ export function LocalPacks({ s }: { s: ContentState }) {
                       查看更新
                     </button>
                   )}
+                  {p.source && p.projectId && (
+                    <button className="row-button" data-local-pack-details={i}>
+                      详情
+                    </button>
+                  )}
                   <button
                     className="row-button danger-button"
                     data-pack-remove={i}

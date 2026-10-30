@@ -8,8 +8,9 @@ function boot(options={}){
  w.localStorage.setItem('ccl-settings',JSON.stringify({accountMode:'offline',selected:'1.20.1',gameDir:'/game'}));
  w.setInterval=()=>0;w.isTauri=()=>true;w.getCurrentWindow=()=>({});w.listen=async()=>()=>{};w.openDialog=async()=>null;w.saveDialog=async()=>null;
  w.invoke=(name,args={})=>{calls.push({name,args});
-  if(name==='list_versions'||name==='installed_versions')return Promise.resolve([{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}]);
-  if(name==='list_mods')return Promise.resolve([]);
+  if(name==='list_versions'||name==='installed_versions')return Promise.resolve(options.versions||[{id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true}]);
+  if(name==='list_mods')return Promise.resolve(options.mods||[]);
+  if(name==='resolve_local_mod_project')return options.resolveLocal?options.resolveLocal(args):Promise.resolve(null);
   if(name==='list_worlds')return Promise.resolve([{folder:'world1',name:'我的世界',gameVersion:'1.20.1',lastPlayed:1760000000000}]);
   if(name==='list_backups')return Promise.resolve([{id:'b-1',scope:'world',world:'world1',created:1760000000,size:4096}]);
   if(name==='check_mod_conflicts')return Promise.resolve({checked:2,unknown:1,issues:[{kind:'missing',message:'缺少依赖 example',files:['a.jar']}]});
@@ -20,7 +21,7 @@ function boot(options={}){
   if(name==='check_pack_updates')return Promise.resolve(options.packUpdates||{checked:0,unknown:0,failed:0,updates:[]});
   if(name==='remove_local_pack'){options.packs=(options.packs||[]).filter(p=>p.name!==args.name);return Promise.resolve();}
   if(name==='search_content')return Promise.resolve({hits:options.hits||[{id:'project1',title:'示例项目',description:'简介',installed:false},{id:'project2',title:'已安装项目',description:'简介',installed:true}],hasMore:!!options.hasMore});
-  if(name==='content_links')return Promise.resolve({links:[],description:options.description||'详情'});
+  if(name==='content_links')return Promise.resolve({links:[],description:options.description===undefined?'详情':options.description,summary:options.summary});
   if(name==='translate_content')return options.translate?options.translate(args):Promise.resolve(null);
   if(name==='translate_content_summaries')return options.translateSummaries?options.translateSummaries(args):Promise.resolve({});
   if(name==='lookup_mcmod')return options.lookup?options.lookup(args):Promise.resolve(null);
@@ -220,4 +221,51 @@ test('navigation works when a user clicks an SVG icon',async()=>{
   icon.dispatchEvent(new app.w.MouseEvent('click',{bubbles:true}));await tick();
   assert.ok(app.w.document.querySelector('#content-form'));
  }finally{app.close();}
+});
+
+
+test('installed mod details resolve the project and show translated description with original toggle',async()=>{
+ const app=boot({mods:[{name:'example.jar',displayName:'Example',description:'Local description',enabled:true}],resolveLocal:()=>Promise.resolve({source:'modrinth',projectId:'abc123'}),description:'Original online description',translate:()=>Promise.resolve('已安装模组的中文介绍')});
+ try{await tick();app.click('[data-page=content]');await tick();app.click('[data-content-view=installed]');app.click('[data-local-mod-details="0"]');await tick();await tick();
+  assert.match(app.w.document.querySelector('.local-mod-dialog .project-description').textContent,/已安装模组的中文介绍/);
+  const req=app.calls.findLast(c=>c.name==='translate_content');assert.equal(req.args.projectId,'abc123');assert.equal(req.args.description,'Original online description');
+  app.click('[data-action=toggle-content-language]');assert.match(app.w.document.querySelector('.local-mod-dialog .project-description').textContent,/Original online description/);
+  app.click('[data-action=toggle-content-language]');assert.match(app.w.document.querySelector('.local-mod-dialog .project-description').textContent,/已安装模组的中文介绍/);
+ }finally{app.close();}
+});
+
+test('unidentified or unavailable installed mod details preserve local text',async()=>{
+ const app=boot({mods:[{name:'unknown.jar',displayName:'Unknown',description:'Local description',enabled:true}],resolveLocal:()=>Promise.resolve(null)});
+ try{await tick();app.click('[data-page=content]');await tick();app.click('[data-content-view=installed]');app.click('[data-local-mod-details="0"]');await tick();
+  assert.match(app.w.document.querySelector('.local-mod-dialog').textContent,/Local description/);assert.match(app.w.document.querySelector('.local-mod-dialog').textContent,/未识别项目来源/);assert.ok(!app.calls.some(c=>c.name==='translate_content'));
+ }finally{app.close();}
+});
+
+test('stale installed mod translation does not overwrite another detail dialog',async()=>{
+ let resolveFirst;const app=boot({mods:[{name:'first.jar',displayName:'First',description:'First local',enabled:true},{name:'second.jar',displayName:'Second',description:'Second local',enabled:true}],resolveLocal:({name})=>Promise.resolve({source:'modrinth',projectId:name==='first.jar'?'first':'second'}),translate:({projectId})=>projectId==='first'?new Promise(resolve=>{resolveFirst=resolve;}):Promise.resolve('第二个译文')});
+ try{await tick();app.click('[data-page=content]');await tick();app.click('[data-content-view=installed]');app.click('[data-local-mod-details="0"]');await tick();app.click('[data-action=close-local-mod]');app.click('[data-local-mod-details="1"]');await tick();resolveFirst('过期译文');await tick();assert.match(app.w.document.querySelector('.local-mod-dialog').textContent,/第二个译文/);assert.doesNotMatch(app.w.document.querySelector('.local-mod-dialog').textContent,/过期译文/);
+ }finally{app.close();}
+});
+
+test('installed resource packs open translated project details without an installation form',async()=>{
+ const app=boot({packs:[{name:'known.zip',source:'modrinth',projectId:'known'}],description:'Pack description',translate:()=>Promise.resolve('材质包中文介绍')});
+ try{await tick();app.click('[data-page=content]');await tick();app.change('#content-form [name=kind]','resourcepack');await tick();await tick();app.click('[data-content-view=installed]');app.click('[data-local-pack-details="0"]');await tick();await tick();assert.match(app.w.document.querySelector('.mod-dialog').textContent,/材质包中文介绍/);assert.ok(!app.w.document.querySelector('[data-action=confirm-mod-install]'));app.click('[data-action=toggle-content-language]');assert.match(app.w.document.querySelector('.mod-dialog').textContent,/Pack description/);
+ }finally{app.close();}
+});
+
+test('installed modpack instance opens translated project details from version management',async()=>{
+ const app=boot({versions:[{id:'pack',name:'Pack',kind:'整合包',installed:true,projectSource:'modrinth',projectId:'pack-id'}],description:'Modpack description',translate:()=>Promise.resolve('整合包中文介绍')});
+ try{await tick();app.click('[data-page=versions]');app.click('[data-installed-pack-details="pack"]');await tick();await tick();assert.match(app.w.document.querySelector('.mod-dialog').textContent,/整合包中文介绍/);assert.ok(!app.w.document.querySelector('[data-action=confirm-mod-install]'));assert.equal(app.calls.findLast(c=>c.name==='translate_content').args.projectId,'pack-id');
+ }finally{app.close();}
+});
+
+
+test('installed mod falls back to translating the original project summary',async()=>{
+ const app=boot({mods:[{name:'short.jar',description:'Local',enabled:true}],resolveLocal:()=>Promise.resolve({source:'modrinth',projectId:'short'}),description:'',summary:'Original summary',translate:()=>Promise.resolve('中文摘要')});
+ try{await tick();app.click('[data-page=content]');await tick();app.click('[data-content-view=installed]');app.click('[data-local-mod-details="0"]');await tick();await tick();assert.match(app.w.document.querySelector('.local-mod-dialog').textContent,/中文摘要/);const args=app.calls.findLast(c=>c.name==='translate_content').args;assert.equal(args.description,'');assert.equal(args.summary,'Original summary');}finally{app.close();}
+});
+
+test('installed CurseForge mod explains when its API key is unavailable',async()=>{
+ const app=boot({mods:[{name:'curse.jar',description:'Local original',enabled:true}],resolveLocal:()=>Promise.resolve({source:'curseforge',projectId:'123'})});
+ try{await tick();app.click('[data-page=content]');await tick();app.click('[data-content-view=installed]');app.click('[data-local-mod-details="0"]');await tick();assert.match(app.w.document.querySelector('.local-mod-dialog').textContent,/CurseForge API Key/);assert.match(app.w.document.querySelector('.local-mod-dialog').textContent,/Local original/);assert.ok(!app.calls.some(c=>c.name==='translate_content'));}finally{app.close();}
 });

@@ -52,6 +52,8 @@ struct Version {
     released: String,
     installed: bool,
     official: bool,
+    project_source: Option<String>,
+    project_id: Option<String>,
     isolated: bool,
     has_instance_data: bool,
 }
@@ -591,6 +593,8 @@ async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     .join(format!("{id}.json"))
                     .exists(),
                 official: true,
+                project_source: None,
+                project_id: None,
                 isolated: false,
                 has_instance_data: false,
             })
@@ -648,6 +652,9 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     .to_path_buf();
                 let isolated = loaders::is_isolated(&game_root, &id, &meta);
                 let has_instance_data = game_root.join("instances").join(&id).is_dir();
+                let (project_source, project_id) = pack_project_identity(&id, &meta)
+                    .map(|(source, project)| (Some(source), Some(project)))
+                    .unwrap_or((None, None));
                 versions.push(Version {
                     id,
                     name,
@@ -655,6 +662,8 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     released: String::new(),
                     installed: true,
                     official: false,
+                    project_source,
+                    project_id,
                     isolated,
                     has_instance_data,
                 });
@@ -663,6 +672,35 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
     }
     versions.sort_by(|a, b| b.id.cmp(&a.id));
     Ok(versions)
+}
+
+fn pack_project_identity(id: &str, meta: &Value) -> Option<(String, String)> {
+    if !meta["cclPackName"].is_string() {
+        return None;
+    }
+    let explicit = meta["cclProjectSource"]
+        .as_str()
+        .zip(meta["cclProjectId"].as_str());
+    let legacy = || {
+        let suffix = id.strip_prefix("ccl-pack-")?;
+        let (source, rest) = suffix.split_once('-')?;
+        let (project, _) = rest.split_once('-')?;
+        if !project.bytes().all(|b| b.is_ascii_alphanumeric()) {
+            return None;
+        }
+        Some((source, project))
+    };
+    let (source, project) = explicit.or_else(legacy)?;
+    if !matches!(source, "modrinth" | "curseforge")
+        || project.is_empty()
+        || project.len() > 200
+        || !project
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+    {
+        return None;
+    }
+    Some((source.to_string(), project.to_string()))
 }
 #[tauri::command]
 async fn install_version(
@@ -1442,6 +1480,7 @@ fn main() {
             content::check_pack_updates,
             content::shader_environment,
             content::list_mods,
+            content::resolve_local_mod_project,
             content::check_mod_updates,
             modcheck::check_mod_conflicts,
             content::set_mod_enabled,
@@ -1456,8 +1495,35 @@ fn main() {
 #[cfg(test)]
 mod download_tests {
     use super::*;
+    use serde_json::json;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    #[test]
+    fn installed_modpack_project_identity_supports_existing_instances() {
+        let old = json!({"cclPackName":"Pack"});
+        assert_eq!(
+            pack_project_identity("ccl-pack-modrinth-Ab12Cd34-version", &old),
+            Some(("modrinth".into(), "Ab12Cd34".into()))
+        );
+        assert_eq!(
+            pack_project_identity("ccl-pack-curseforge-12345-67890", &old),
+            Some(("curseforge".into(), "12345".into()))
+        );
+        assert_eq!(
+            pack_project_identity("ccl-pack-invalid-abc-version", &old),
+            None
+        );
+        assert_eq!(
+            pack_project_identity("ccl-pack-modrinth-abc-version", &json!({})),
+            None
+        );
+        let current = json!({"cclPackName":"Pack", "cclProjectSource":"modrinth", "cclProjectId":"my-project"});
+        assert_eq!(
+            pack_project_identity("any-id", &current),
+            Some(("modrinth".into(), "my-project".into()))
+        );
+    }
 
     #[test]
     fn offline_skin_writes_only_to_the_selected_instance() {

@@ -181,6 +181,7 @@ fn project_links(value: &Value, source: &str) -> Vec<ProjectLink> {
 pub struct ContentInfo {
     links: Vec<ProjectLink>,
     description: Option<String>,
+    summary: Option<String>,
 }
 #[tauri::command]
 pub async fn content_links(
@@ -204,6 +205,13 @@ pub async fn content_links(
     };
     Ok(ContentInfo {
         links: project_links(project, &source),
+        summary: project[if source == "modrinth" {
+            "description"
+        } else {
+            "summary"
+        }]
+        .as_str()
+        .map(str::to_string),
         description: if source == "modrinth" {
             project["body"].as_str().map(str::to_string)
         } else {
@@ -1089,11 +1097,7 @@ fn required_mod_dependencies(version: &Value, source: &str) -> Option<Vec<String
 
 // Records cover CurseForge and offline installations; Modrinth hashes also recognize
 // files installed before CCL started keeping records or copied from another launcher.
-async fn installed_projects(
-    client: &reqwest::Client,
-    dir: &Path,
-    source: &str,
-) -> ResultT<HashMap<String, String>> {
+fn recorded_projects(dir: &Path, source: &str) -> HashMap<String, String> {
     let mods = dir.join("mods");
     let records: Value = fs::read(dir.join(".ccl-mods.json"))
         .ok()
@@ -1117,8 +1121,17 @@ async fn installed_projects(
             }
         }
     }
+    ids
+}
+async fn installed_projects(
+    client: &reqwest::Client,
+    dir: &Path,
+    source: &str,
+) -> ResultT<HashMap<String, String>> {
+    let mut ids = recorded_projects(dir, source);
     if source == "modrinth" {
-        let hashes = tokio::task::spawn_blocking(move || hash_mod_files(&mods))
+        let mods = dir.join("mods");
+        let hashes = tokio::task::spawn_blocking(move || hash_mod_files(&mods, None))
             .await
             .map_err(|e| format!("读取已安装模组失败: {e}"))?;
         if !hashes.is_empty() {
@@ -1136,12 +1149,15 @@ type ModFileCache = HashMap<PathBuf, (u64, std::time::SystemTime, String)>;
 static MOD_FILE_HASHES: OnceLock<Mutex<ModFileCache>> = OnceLock::new();
 static MOD_IDENTITIES: OnceLock<Mutex<HashMap<String, (Instant, HashMap<String, String>)>>> =
     OnceLock::new();
-fn hash_mod_files(mods: &Path) -> HashMap<String, String> {
+fn hash_mod_files(mods: &Path, selected: Option<&str>) -> HashMap<String, String> {
     let mut hashes = HashMap::new();
     let cache = MOD_FILE_HASHES.get_or_init(|| Mutex::new(HashMap::new()));
     if let Ok(entries) = fs::read_dir(mods) {
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
+            if selected.is_some_and(|selected| selected != name) {
+                continue;
+            }
             if !(name.ends_with(".jar") || name.ends_with(".jar.disabled"))
                 || !entry.file_type().map(|t| t.is_file()).unwrap_or(false)
             {
@@ -1923,6 +1939,60 @@ pub fn list_mods(game_dir: String, version: String) -> ResultT<Vec<LocalMod>> {
     }
     mods.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     Ok(mods)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LocalProject {
+    source: String,
+    project_id: String,
+}
+
+// Match only the selected file to a recorded project or an exact Modrinth hash.
+#[tauri::command]
+pub async fn resolve_local_mod_project(
+    game_dir: String,
+    version: String,
+    name: String,
+) -> ResultT<Option<LocalProject>> {
+    safe_name(&name)?;
+    if !(name.ends_with(".jar") || name.ends_with(".jar.disabled")) {
+        return Err("无效的模组文件".into());
+    }
+    let (dir, _, _) = current_instance(&game_dir, &version)?;
+    let metadata = fs::symlink_metadata(dir.join("mods").join(&name)).map_err(|e| e.to_string())?;
+    if !metadata.file_type().is_file() {
+        return Err("模组文件不可用".into());
+    }
+    for source in ["curseforge", "modrinth"] {
+        let projects = recorded_projects(&dir, source);
+        if let Some((project_id, _)) = projects
+            .into_iter()
+            .find(|(id, file)| file == &name && valid_id(id).is_ok())
+        {
+            return Ok(Some(LocalProject {
+                source: source.into(),
+                project_id,
+            }));
+        }
+    }
+    let client = http_client()?;
+    let mods = dir.join("mods");
+    let selected_name = name.clone();
+    let hashes = tokio::task::spawn_blocking(move || hash_mod_files(&mods, Some(&selected_name)))
+        .await
+        .map_err(|e| format!("读取已安装模组失败: {e}"))?;
+    if hashes.is_empty() {
+        return Ok(None);
+    }
+    let projects = identify_mod_hashes(&client, &hashes).await;
+    if let Some(project_id) = projects.into_values().find(|id| valid_id(id).is_ok()) {
+        return Ok(Some(LocalProject {
+            source: "modrinth".into(),
+            project_id,
+        }));
+    }
+    Ok(None)
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -3136,6 +3206,8 @@ async fn install_modpack_impl(
     meta["cclLoader"] = json!(loader);
     meta["cclInstance"] = json!(true);
     meta["cclPackName"] = json!(manifest["name"].as_str().unwrap_or("整合包"));
+    meta["cclProjectSource"] = json!(&source);
+    meta["cclProjectId"] = json!(&project_id);
     let staging = dir.join("instances").join(format!(".{pack_id}.installing"));
     if staging.exists() {
         fs::remove_dir_all(&staging).map_err(|e| e.to_string())?;
@@ -3577,15 +3649,44 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("example.jar"), b"first").unwrap();
-        let first = hash_mod_files(&dir);
+        fs::write(dir.join("other.jar"), b"other").unwrap();
+        let selected = hash_mod_files(&dir, Some("example.jar"));
+        assert_eq!(selected.len(), 1);
+        assert_eq!(
+            selected.values().next().map(String::as_str),
+            Some("example.jar")
+        );
+        fs::remove_file(dir.join("other.jar")).unwrap();
+        let first = hash_mod_files(&dir, None);
         assert_eq!(first.len(), 1);
-        assert_eq!(hash_mod_files(&dir), first);
+        assert_eq!(hash_mod_files(&dir, None), first);
         fs::write(dir.join("example.jar"), b"second and changed").unwrap();
-        let second = hash_mod_files(&dir);
+        let second = hash_mod_files(&dir, None);
         assert_eq!(second.len(), 1);
         assert_ne!(first, second);
         fs::remove_file(dir.join("example.jar")).unwrap();
-        assert!(hash_mod_files(&dir).is_empty());
+        assert!(hash_mod_files(&dir, None).is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn recorded_projects_identify_enabled_and_disabled_mods() {
+        let dir = std::env::temp_dir().join(format!("ccl-recorded-mods-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(dir.join("mods")).unwrap();
+        fs::write(dir.join("mods/example.jar.disabled"), b"mod").unwrap();
+        fs::write(
+            dir.join(".ccl-mods.json"),
+            r#"{"modrinth":{"project1":"example.jar","missing":"missing.jar"}}"#,
+        )
+        .unwrap();
+        let projects = recorded_projects(&dir, "modrinth");
+        assert_eq!(
+            projects.get("project1").map(String::as_str),
+            Some("example.jar.disabled")
+        );
+        assert!(!projects.contains_key("missing"));
+        assert!(recorded_projects(&dir, "curseforge").is_empty());
         fs::remove_dir_all(dir).unwrap();
     }
 

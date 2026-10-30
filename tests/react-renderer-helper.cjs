@@ -33,6 +33,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/launcher-state.ts',['readSettings','createInitialState','createTheme','persistSettings']);
  load(window,'lib/appearance-controller.ts',['createAppearanceController']);
  load(window,'lib/content-detail.ts',['createContentDetail']);
+ load(window,'lib/local-mod-detail.ts',['createLocalModDetail']);
  load(window,'lib/game-launcher.ts',['createGameLauncher']);
  load(window,'lib/account-actions.ts',['createAccountActions']);
  load(window,'react/renderer.tsx',['createRenderer']);
@@ -60,7 +61,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/local-packs.tsx',['LocalPacks']);
  load(window,'react/content.tsx',['ContentPage']);
  load(window,'react/local-mod-dialog.tsx',['LocalModDialog']);
- load(window,'react/content-dialog.tsx',['ContentDialog']);
+ load(window,'react/content-dialog.tsx',['ContentDialog','ProjectDescription']);
  load(window,'react/shell.tsx',['Shell']);
  load(window,'react/instance-settings-model.ts',['normalizeInstanceSettings','resolveInstanceSettings']);
  load(window,'lib/instance-launch-settings.ts',['createInstanceLaunchSettings']);

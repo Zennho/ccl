@@ -52,7 +52,7 @@ export interface ContentState {
   shaderEnv: Environment | null;
   shaderEnvLoading: boolean;
   shaderEnvError: string;
-  localPacks: { name: string; directory: boolean; source?: string }[];
+  localPacks: { name: string; directory: boolean; source?: string; projectId?: string }[];
   packQuery: string;
   packLoading: boolean;
   packError: string;

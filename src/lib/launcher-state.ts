@@ -6,6 +6,7 @@ import type { InstanceOverviewView } from '../react/instance-overview';
 import type { LaunchView, Crash } from '../react/launch';
 import type { MemoryInfo, UpdateInfo } from './system-status';
 import type { ContentDraft } from './content-detail';
+import type { LocalModDetail } from './local-mod-detail';
 import type { ArchiveDraft } from './archive-manager';
 import type { MicrosoftAccount } from './account-restore';
 import type { LocalSkin } from './avatar-store';
@@ -137,7 +138,7 @@ export interface LauncherState {
   updateInfo: UpdateInfo | null;
   updateError: string;
   updateDismissed: string;
-  localPacks: { name: string; directory: boolean; source?: string }[];
+  localPacks: { name: string; directory: boolean; source?: string; projectId?: string }[];
   packQuery: string;
   packLoading: boolean;
   packError: string;
@@ -149,7 +150,7 @@ export interface LauncherState {
   shaderEnvLoading: boolean;
   shaderEnvError: string;
   localMods: LocalMod[];
-  localModDetail: LocalMod | null;
+  localModDetail: LocalModDetail | null;
   modQuery: string;
   modFilter: string;
   selectedMods: Set<string>;

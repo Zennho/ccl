@@ -2,6 +2,7 @@ export interface LocalPack {
   name: string;
   directory?: boolean;
   source?: string;
+  projectId?: string;
 }
 export interface ShaderEnvironment {
   loader?: string;

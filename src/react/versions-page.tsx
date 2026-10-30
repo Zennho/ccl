@@ -53,6 +53,11 @@ function VersionRow({ version: v, selected, visual, catalog }: VersionRowProps) 
                   <Icon name={icon} size={15} /> {title}
                 </button>
               ))}
+              {v.kind === '整合包' && v.projectSource && v.projectId && (
+                <button data-installed-pack-details={v.id}>
+                  <Icon name="box" size={15} /> 整合包详情
+                </button>
+              )}
             </div>
           </details>
         </>

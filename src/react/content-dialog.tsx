@@ -22,7 +22,21 @@ function descriptionText(value?: string) {
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
-function ProjectDescription({ draft: d }: { draft: ContentDraft }) {
+export function ProjectDescription({
+  draft: d,
+}: {
+  draft: Pick<
+    ContentDraft,
+    | 'description'
+    | 'summary'
+    | 'encyclopedia'
+    | 'translation'
+    | 'showOriginal'
+    | 'descriptionLoading'
+    | 'translationLoading'
+    | 'descriptionError'
+  >;
+}) {
   const original = descriptionText(d.description) || String(d.summary || '').trim();
   const excerptText = String(d.encyclopedia?.summary || '')
       .replace(/\[[^\]]{1,120}\]/g, '')
@@ -136,16 +150,18 @@ export function ContentDialog({
             </span>
             <h2 id="mod-dialog-title">{d.title}</h2>
             <p>
-              {pack
-                ? '整合包将创建独立游戏目录'
-                : `安装到 ${d.target}${d.kind === 'mod' ? ' · 自动安装必需依赖' : d.kind === 'shader' ? ' · 游戏中需支持光影并手动启用' : ' · 在游戏资源包设置中启用'}`}
+              {d.detailOnly
+                ? '已安装 · 项目详情'
+                : pack
+                  ? '整合包将创建独立游戏目录'
+                  : `安装到 ${d.target}${d.kind === 'mod' ? ' · 自动安装必需依赖' : d.kind === 'shader' ? ' · 游戏中需支持光影并手动启用' : ' · 在游戏资源包设置中启用'}`}
             </p>
           </div>
           <button className="icon-button" data-action="close-mod-dialog" aria-label="关闭">
             <Icon name="x" size={19} />
           </button>
         </div>
-        {d.kind === 'shader' && (
+        {d.kind === 'shader' && !d.detailOnly && (
           <p className="pack-dialog-status">
             {shaderEnvLoading
               ? '正在检测光影环境…'
@@ -160,7 +176,7 @@ export function ContentDialog({
         <div className="mod-project-links">
           <ProjectLinks draft={d} />
         </div>
-        {!pack && (
+        {!pack && !d.detailOnly && (
           <>
             <div className="install-section-heading">
               <span>01</span>
@@ -202,36 +218,40 @@ export function ContentDialog({
             )}
           </>
         )}
-        <div className="install-summary" aria-label="安装摘要">
-          <strong>安装摘要</strong>
-          <span>{pack ? '创建独立实例' : `目标实例：${d.target}`}</span>
-          {!pack && (
-            <small>
-              {selectedVersion ? `选择版本：${selectedVersion.name}` : '尚未选择可安装版本'}
-              {d.kind === 'mod' &&
-                (selectedVersion?.requiredDependencies
-                  ? selectedVersion.requiredDependencies.length
-                    ? ` · 声明的直接必需依赖 ID：${selectedVersion.requiredDependencies.join('、')}`
-                    : ' · 没有声明直接必需依赖'
-                  : ' · 必需依赖信息将在安装时解析')}
-            </small>
-          )}
-          {d.kind === 'mod' && selectedVersion?.requiredDependencies && (
-            <small>安装时会检查已安装依赖并继续解析间接依赖。</small>
-          )}
-        </div>
+        {!d.detailOnly && (
+          <div className="install-summary" aria-label="安装摘要">
+            <strong>安装摘要</strong>
+            <span>{pack ? '创建独立实例' : `目标实例：${d.target}`}</span>
+            {!pack && (
+              <small>
+                {selectedVersion ? `选择版本：${selectedVersion.name}` : '尚未选择可安装版本'}
+                {d.kind === 'mod' &&
+                  (selectedVersion?.requiredDependencies
+                    ? selectedVersion.requiredDependencies.length
+                      ? ` · 声明的直接必需依赖 ID：${selectedVersion.requiredDependencies.join('、')}`
+                      : ' · 没有声明直接必需依赖'
+                    : ' · 必需依赖信息将在安装时解析')}
+              </small>
+            )}
+            {d.kind === 'mod' && selectedVersion?.requiredDependencies && (
+              <small>安装时会检查已安装依赖并继续解析间接依赖。</small>
+            )}
+          </div>
+        )}
         <div className="install-actions">
           <button className="outline-btn" data-action="close-mod-dialog">
             取消
           </button>
-          <button
-            className="save-button"
-            data-action="confirm-mod-install"
-            disabled={d.installed || (!pack && (d.loading || !!d.error || !d.versions.length))}
-          >
-            {d.installed ? '已安装' : d.kind === 'modpack' ? '开始安装' : '后台安装'}{' '}
-            <Icon name="chevron-right" size={16} />
-          </button>
+          {!d.detailOnly && (
+            <button
+              className="save-button"
+              data-action="confirm-mod-install"
+              disabled={d.installed || (!pack && (d.loading || !!d.error || !d.versions.length))}
+            >
+              {d.installed ? '已安装' : d.kind === 'modpack' ? '开始安装' : '后台安装'}{' '}
+              <Icon name="chevron-right" size={16} />
+            </button>
+          )}
         </div>
       </section>
     </div>
