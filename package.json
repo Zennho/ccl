@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "tauri": "tauri",
-    "test": "node --test tests/job-manager.test.mjs tests/mod-manager.test.mjs tests/version-manager.test.mjs tests/version-check.test.mjs tests/instance-settings-model.test.cjs && node --test tests/account-restore.test.cjs tests/update-ui.test.cjs tests/pack-ui.test.cjs tests/crash-ui.test.cjs tests/instance-profile-ui.test.cjs && node tests/ui.cjs",
+    "test": "node --test tests/job-manager.test.mjs tests/account-restorer.test.mjs tests/mod-manager.test.mjs tests/version-manager.test.mjs tests/version-check.test.mjs tests/instance-settings-model.test.cjs && node --test tests/account-restore.test.cjs tests/update-ui.test.cjs tests/pack-ui.test.cjs tests/crash-ui.test.cjs tests/instance-profile-ui.test.cjs && node tests/ui.cjs",
     "check:version": "node scripts/check-versions.mjs",
     "check": "npm run check:version && npm run typecheck && npm test && npm run build",
     "typecheck": "tsc --noEmit"

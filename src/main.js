@@ -6,7 +6,7 @@ import './launch-screen.css';
 import './management.css';
 import './update.css';
 import { createJobManager } from './job-manager.ts';
-import { appearanceDefaults, clampAppearance, bannerPeriod, imageStore, validateThemeImage } from './lib/appearance.ts';
+import { imageStore, validateThemeImage } from './lib/appearance.ts';
 import { createThumbnailLoader } from './lib/thumbnails.ts';
 import { createInputController } from './lib/input-controller.ts';
 import { createAccountRestorer } from './lib/account-restore.ts';
@@ -20,6 +20,11 @@ import { createSystemStatus } from './lib/system-status.ts';
 import { syncMemoryControls as syncMemoryFields } from './lib/memory-controls.ts';
 import { createMultiplayer, copyText } from './lib/multiplayer.ts';
 import { createVersionManager } from './lib/version-manager.ts';
+import { createAvatarStore } from './lib/avatar-store.ts';
+import { createAccountAppearance } from './lib/account-appearance.ts';
+import { createInstanceTheme, instanceColors, instanceKey } from './lib/instance-theme.ts';
+import { readSettings, createInitialState, createTheme, persistSettings } from './lib/launcher-state.ts';
+import { createAppearanceController } from './lib/appearance-controller.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -45,21 +50,11 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-let saved = {};
-try { saved = JSON.parse(localStorage.getItem('ccl-settings') || '{}') || {}; } catch { /* Recover from damaged local settings. */ }
-const state = { page: 'home', lanView: 'room', serverCatalog: null, serverLoading: false, serverError: '', serverQuery: '', serverStatus: 'all', serverPage: 0, lanAddresses: [], lanRoom: null, lanBusy: false, lanPort: '', lanTarget: '', lanTest: '', versions: [], selected: saved.selected || '', username: saved.username || 'Player', javaPath: saved.javaPath || 'java', proxyUrl: saved.proxyUrl || '', gameDir: saved.gameDir || '', memory: saved.memory || 4096, memoryMode: saved.memoryMode === 'auto' ? 'auto' : saved.memoryMode === 'manual' || saved.memory != null ? 'manual' : 'auto', memoryInfo: null, memoryInfoError: '', memoryInfoLoading: false, optimize: saved.optimize !== false, jvmArgs: saved.jvmArgs || '', gameArgs: saved.gameArgs || '', contentTarget: '', modDraft: null, archiveDraft: null, launchView: null, crash: null, crashDialog: null, noticeCrash: false, versionQuery: '', accountMode: 'offline', accountKnown: saved.accountKnown===true, accountName: typeof saved.accountName==='string'?saved.accountName:'', accountUuid: typeof saved.accountUuid==='string'?saved.accountUuid:'', accountPreference: saved.accountMode==='offline'?'offline':'microsoft', accountRestoring: false, accountRestoreError: '', restoreAttempt: null, account: null, savedAccounts: [], browserPrompt: null, loginAttempt: null, accountBusy: false, appearance: null, localSkin: null, localCape: null, previewCapeId: '', skinModel: 'classic', loading: false, notice: '', noticeKind: '', online: false, javaRuntimes: [], javaLoading: false, javaDelete: null, versionDelete: null, instanceView: null, instanceSettingsView: null, manageView: null, themeView: null, profileView: null, versionDeleting: false, contentSource: 'modrinth', contentKind: 'mod', contentQuery: '', contentKey: '', contentSort: 'downloads', contentCategory: '', contentCategories: [], contentCategoriesLoading: false, contentCategoryError: '', contentGameFilter: '', contentLoaderFilter: '', contentEnvironment: '', contentPage: 0, contentHasMore: false, contentLoaded: false, contentError: '', contentResults: [], contentBusy: false, updateState: 'idle', updateInfo: null, updateError: '', updateDismissed: '', localPacks: [], packQuery: '', packLoading: false, packError: '', packWorking: false, packChecking: false, packUpdates: null, packDelete: null, shaderEnv: null, shaderEnvLoading: false, shaderEnvError: '', localMods: [], modQuery: '', modFilter: 'all', selectedMods: new Set(), modWorking: false, modChecking: false, modConflicts: null, modConflictsLoading: false, modUpdates: null, modDelete: null, jobs: [], jobLimit: Math.max(1, Math.min(5, Number(saved.jobLimit) || 3)), installDraft: null };
-const theme = { bannerOpacity: clampAppearance(saved.theme?.bannerOpacity, 0), bannerFrost: clampAppearance(saved.theme?.bannerFrost, 0), bannerBlur: clampAppearance(saved.theme?.bannerBlur, 0, 30), backgroundOpacity: clampAppearance(saved.theme?.backgroundOpacity, 35), backgroundFrost: clampAppearance(saved.theme?.backgroundFrost, 42), backgroundBlur: clampAppearance(saved.theme?.backgroundBlur, 8, 30), banner: null, background: null };
+const saved=readSettings(localStorage);
+const state=createInitialState(saved);
+const theme=createTheme(saved);
 const app = document.querySelector('#app');
 const renderer = createRenderer(app);
-const instanceColors=['#76956d','#6d91a3','#a68072','#9b83a9','#c29d63','#7f8a78'];
-let instanceThemes={};
-try{const value=JSON.parse(localStorage.getItem('ccl-instance-themes')||'{}');if(value&&typeof value==='object'&&!Array.isArray(value))instanceThemes=value;}catch{}
-const instanceCovers=new Map();
-const instanceCoverPending=new Map();
-const instanceCoverRevision=new Map();
-let instanceCoverRenderTimer=null;
-function scheduleInstanceCoverRender(){if(instanceCoverRenderTimer!==null)return;instanceCoverRenderTimer=setTimeout(()=>{instanceCoverRenderTimer=null;if(state.page==='home'||state.page==='versions')render();},50);}
-const instanceKey=(gameDir,version)=>JSON.stringify([gameDir,version]);
 let offlineSkinInstances={};
 try { const value=JSON.parse(localStorage.getItem('ccl-offline-skin-instances')||'{}');if(value && typeof value==='object' && !Array.isArray(value))offlineSkinInstances=value; } catch {}
 let instanceLaunchSettings={};
@@ -71,54 +66,18 @@ function effectiveLaunchSettings(gameDir,version) {
  return resolveInstanceSettings(state,getLaunchSettings(gameDir,version));
 }
 
-function getInstanceTheme(gameDir,version){const entry=instanceThemes[instanceKey(gameDir,version)];return {color:instanceColors.includes(entry?.color)?entry.color:instanceColors[0],description:typeof entry?.description==='string'?entry.description.slice(0,180):'',hasCover:entry?.hasCover===true};}
-function currentInstanceCover(){return instanceCovers.get(instanceKey(state.gameDir,state.selected))||null;}
-async function loadInstanceCover(gameDir,version){
- if(!gameDir||!version)return;
- const key=instanceKey(gameDir,version);if(!getInstanceTheme(gameDir,version).hasCover||instanceCovers.has(key))return;
- if(instanceCoverPending.has(key))return instanceCoverPending.get(key);
- const revision=instanceCoverRevision.get(key)||0;
- const pending=imageStore('get',`instance-cover:${key}`).then(blob=>{if(!blob||revision!==(instanceCoverRevision.get(key)||0)||!getInstanceTheme(gameDir,version).hasCover)return;const old=instanceCovers.get(key);if(old)URL.revokeObjectURL(old);instanceCovers.set(key,URL.createObjectURL(blob));if(state.gameDir===gameDir&&state.selected===version)applyTheme();scheduleInstanceCoverRender();}).catch(()=>{}).finally(()=>instanceCoverPending.delete(key));
- instanceCoverPending.set(key,pending);return pending;
-}
-function loadInstalledCovers(){for(const v of state.versions.filter(v=>v.installed))void loadInstanceCover(state.gameDir,v.id);}
+const instanceTheme=createInstanceTheme({state,storage:localStorage,store:imageStore,validate:validateThemeImage,render,renderOverlay,applyTheme,flash});
+const getInstanceTheme=instanceTheme.getTheme,loadInstanceCover=instanceTheme.load,loadInstalledCovers=instanceTheme.loadInstalled;
+function currentInstanceCover(){return instanceTheme.getCover(state.gameDir,state.selected);}
 const gameProfile=createGameProfile({state,render:renderOverlay,
  list:(gameDir,version,page)=>invoke('list_game_screenshots',{gameDir,version,page}),
  screenshot:(gameDir,version,name)=>invoke('game_screenshot',{gameDir,version,name}),
  stats:(gameDir,version)=>invoke('play_stats',{gameDir,version})});
 const openGameProfile=gameProfile.open,loadProfileScreenshots=gameProfile.loadScreenshots;
 
-function updateDefaultBanner() {
- document.documentElement.dataset.bannerPeriod=bannerPeriod();
-}
-function applyTheme() {
- const root=document.documentElement;
- root.style.setProperty('--ccl-instance-accent', getInstanceTheme(state.gameDir,state.selected).color);
- root.style.setProperty('--ccl-banner-opacity', String(1-theme.bannerOpacity/100));
- root.style.setProperty('--ccl-banner-frost', String(theme.bannerFrost/100));
- root.style.setProperty('--ccl-banner-blur', `${theme.bannerBlur}px`);
- root.style.setProperty('--ccl-background-opacity', String(1-theme.backgroundOpacity/100));
- root.style.setProperty('--ccl-background-frost', String(theme.backgroundFrost/100));
- root.style.setProperty('--ccl-background-blur', `${theme.backgroundBlur}px`);
- const banner=currentInstanceCover() || theme.banner;
- root.style.setProperty('--ccl-banner-image', banner ? `url("${banner}")` : 'var(--ccl-default-banner)');
- root.style.setProperty('--ccl-background-image', theme.background ? `url("${theme.background}")` : 'none');
- root.classList.toggle('has-custom-background', !!theme.background);
- root.classList.toggle('has-custom-banner', !!banner);
-}
-const imageRevision={banner:0,background:0};
-function setThemeImage(kind, blob) {
- if(theme[kind]) URL.revokeObjectURL(theme[kind]);
- theme[kind]=blob ? URL.createObjectURL(blob) : null;
- applyTheme();
-}
-async function restoreThemeImages() {
- await Promise.all(['banner','background'].map(async kind=>{
-  const revision=imageRevision[kind];
-  try { const blob=await imageStore('get',kind);if(revision===imageRevision[kind] && blob) setThemeImage(kind,blob); }
-  catch { /* The default theme remains available when storage is unavailable. */ }
- }));
-}
+const appearanceController=createAppearanceController({theme,instanceColor:()=>getInstanceTheme(state.gameDir,state.selected).color,instanceCover:currentInstanceCover,store:imageStore,validate:validateThemeImage,flash});
+function applyTheme(){appearanceController.apply();}
+const updateDefaultBanner=appearanceController.updateDefaultBanner,restoreThemeImages=appearanceController.restore;
 const systemStatus=createSystemStatus({state,isDesktop:isTauri,getMemory:()=>invoke('memory_info'),getUpdate:()=>invoke('check_launcher_update'),
  renderMemory:()=>{if(state.page==='settings'&&app.querySelector('#memory-info'))renderSettingsPage();},renderChrome});
 const refreshMemoryInfo=systemStatus.refreshMemoryInfo,checkLauncherUpdate=systemStatus.checkLauncherUpdate;
@@ -126,52 +85,23 @@ function syncMemoryControls(){syncMemoryFields(app);}
 
 function versionVisual(version) {
  const instance=version?.id?getInstanceTheme(state.gameDir,version.id):null;
- return {color:instance?.color || instanceColors[0],cover:version?.id?instanceCovers.get(instanceKey(state.gameDir,version.id)):null};
+ return {color:instance?.color || instanceColors[0],cover:version?.id?instanceTheme.getCover(state.gameDir,version.id):null};
 }
 const hydrateThumbnails=createThumbnailLoader({container:app,fetchThumbnail:(kind,value)=>invoke('fetch_thumbnail',{kind,value})});
-const persist = () => localStorage.setItem('ccl-settings', JSON.stringify({ selected: state.selected, username: state.username, javaPath: state.javaPath, proxyUrl: state.proxyUrl, gameDir: state.gameDir, memory: state.memory, memoryMode: state.memoryMode, optimize: state.optimize, jvmArgs: state.jvmArgs, gameArgs: state.gameArgs, accountMode: state.accountPreference, accountKnown: state.accountKnown, accountName: state.accountName, accountUuid: state.accountUuid, jobLimit: state.jobLimit, theme: {bannerOpacity:theme.bannerOpacity,bannerFrost:theme.bannerFrost,bannerBlur:theme.bannerBlur,backgroundOpacity:theme.backgroundOpacity,backgroundFrost:theme.backgroundFrost,backgroundBlur:theme.backgroundBlur} }));
+const persist=()=>persistSettings(localStorage,state,theme);
 let launchSequence = 0;
 const usingOnlineAccount = () => state.accountPreference==='microsoft' && (state.accountKnown || !!state.account);
 const playerName = () => usingOnlineAccount() ? (state.account?.name || state.accountName || '正版账户') : state.username;
 const playerStatus = () => usingOnlineAccount() ? (state.account ? '微软账户' : state.accountRestoring ? '正在验证正版账户' : '正版账户 · 待验证') : '离线玩家';
-const cachedAvatars=new Map(), avatarRevisions=new Map(), avatarWrites=new Map(), avatarLoads=new Map();
-const validAvatarAccount = uuid => typeof uuid==='string' && /^[A-Za-z0-9_-]{1,64}$/.test(uuid);
-const validAvatarSkin = skin => typeof skin==='string' && skin.length<=3*1024*1024 && skin.startsWith('data:image/png;base64,');
-function cacheOnlineAvatar(uuid, skin) {
- if(!validAvatarAccount(uuid))return;
- const valid=validAvatarSkin(skin);avatarRevisions.set(uuid,(avatarRevisions.get(uuid)||0)+1);
- if(valid)cachedAvatars.set(uuid,skin);else cachedAvatars.delete(uuid);
- const pending=(avatarWrites.get(uuid)||Promise.resolve()).catch(()=>{}).then(()=>imageStore(valid?'put':'delete',`online-avatar:${uuid}`,valid?skin:undefined));
- avatarWrites.set(uuid,pending);pending.catch(()=>{}).finally(()=>{if(avatarWrites.get(uuid)===pending)avatarWrites.delete(uuid);});
-}
-function restoreOnlineAvatar(uuid) {
- if(!validAvatarAccount(uuid) || cachedAvatars.has(uuid))return Promise.resolve();
- if(avatarLoads.has(uuid))return avatarLoads.get(uuid);
- const revision=avatarRevisions.get(uuid)||0;
- const pending=imageStore('get',`online-avatar:${uuid}`).then(skin=>{
-  if((avatarRevisions.get(uuid)||0)!==revision || !validAvatarSkin(skin))return;
-  cachedAvatars.set(uuid,skin);renderAvatar();
- }).catch(()=>{}).finally(()=>{if(avatarLoads.get(uuid)===pending)avatarLoads.delete(uuid);});
- avatarLoads.set(uuid,pending);return pending;
-}
-let localSkinRevision=0, localSkinStorage=Promise.resolve();
-function saveLocalSkin(skin) {
- ++localSkinRevision;
- localSkinStorage=localSkinStorage.catch(()=>{}).then(()=>imageStore(skin?'put':'delete','local-skin',skin || undefined));
- localSkinStorage.catch(()=>flash('皮肤预览无法保存，重启后需要重新选择。','error'));
-}
-async function restoreLocalSkin() {
- const revision=localSkinRevision;
- try { const skin=await imageStore('get','local-skin');if(revision===localSkinRevision && skin && typeof skin.data==='string' && skin.data.startsWith('data:image/png;base64,') && typeof skin.path==='string' && typeof skin.name==='string'){state.localSkin=skin;state.skinModel=skin.model==='slim'?'slim':'classic';if(state.page==='account')render();else renderChrome();} } catch { /* Local preview is optional when image storage is unavailable. */ }
-}
-function renderAvatar() { renderShell(); }
+const avatarStore=createAvatarStore({state,store:imageStore,render,renderChrome,flash});
+const {cacheOnlineAvatar,restoreOnlineAvatar,saveLocalSkin,restoreLocalSkin}=avatarStore;
 
 const selected = () => state.versions.find(v => v.id === state.selected);
 function flash(message, kind = '') { state.notice = message; state.noticeKind = kind; state.noticeCrash=false; renderChrome(); }
 function showCrashNotice(crash) {state.crash=crash;state.notice=`游戏 ${crash.version} 异常退出（代码 ${crash.code ?? '未知'}）。`;state.noticeKind='error';state.noticeCrash=true;renderChrome();}
 function shellProps() {
  const uuid=state.account?.uuid || state.accountUuid;
- const skin=usingOnlineAccount() ? (state.appearance?.skin || cachedAvatars.get(uuid)) : state.localSkin?.data;
+ const skin=usingOnlineAccount() ? (state.appearance?.skin || avatarStore.get(uuid)) : state.localSkin?.data;
  return {page:state.page,name:playerName(),status:playerStatus(),skin:typeof skin==='string'&&skin.startsWith('data:image/png;base64,')?skin:'',online:state.online,version:appVersion,installedCount:state.versions.filter(v=>v.installed).length,jobCount:activeJobCount(),updateInfo:state.updateInfo,updateDismissed:state.updateDismissed,notice:state.notice,noticeKind:state.noticeKind,noticeCrash:!!(state.crash&&state.noticeCrash)};
 }
 function renderShell() { if(app.querySelector('.app-shell')) renderer.chrome(Shell,shellProps()); }
@@ -209,34 +139,10 @@ const {loadContentCategories,searchContent}=contentSearch;
 
 function updateProjectLinks() { if(state.modDraft && app.querySelector('.mod-dialog')) renderOverlay(); }
 function updateProjectDescription() { if(state.modDraft && app.querySelector('.mod-dialog')) renderOverlay(); }
-let accountListRevision=0;
-async function refreshAccountList() {
- const revision=++accountListRevision;
- try { const accounts=await invoke('list_microsoft_accounts');if(revision!==accountListRevision)return;state.savedAccounts=Array.isArray(accounts)?accounts.filter(a=>typeof a?.uuid==='string' && typeof a?.name==='string'):[];if(state.page==='account')render(); } catch { /* Existing account remains usable when the credential store is unavailable. */ }
-}
-let viewer=null, previewGeneration=0;
-function refreshPreview() {
- const generation=++previewGeneration;
- if(viewer) { viewer.dispose(); viewer=null; }
- const canvas=app.querySelector('#skin-preview'); if(!canvas) return;
- const cape=state.localCape?.data || state.appearance?.capes?.find(c=>c.id===state.previewCapeId)?.texture || null;
- const skin=state.localSkin?.data || state.appearance?.skin || null;
- if(!skin) return;
- import('./appearance-preview.ts').then(m=>m.createAppearancePreview(canvas,skin,cape,state.skinModel)).then(next=>{if(generation!==previewGeneration) next.dispose(); else { viewer=next; if(next.is2d) { const caption=app.querySelector('.preview-caption'); if(caption) caption.textContent=`2D 预览 · ${state.localCape?'本地披风预览':state.previewCapeId?'账户披风预览':'无披风'}`; } }}).catch(()=>{if(generation===previewGeneration) { const el=app.querySelector('.preview-fallback'); if(el) el.hidden=false; }});
-}
-let appearanceRequest=null;
-function refreshAppearance({reuse=false}={}) {
- const account=state.account; if(!account?.uuid) return Promise.resolve();
- if(reuse && appearanceRequest?.account===account) return appearanceRequest.promise;
- const request={account};appearanceRequest=request;
- request.promise=(async()=>{
-  try { const result=await invoke('get_appearance'); if(state.account!==account || appearanceRequest!==request) return; state.appearance=result;cacheOnlineAvatar(account.uuid,result.skin); if(!state.localSkin)state.skinModel=result.model==='slim'?'slim':'classic'; state.previewCapeId=result.capes.find(c=>c.active)?.id || ''; }
-  catch(e) { if(state.account!==account || appearanceRequest!==request) return; state.appearance=null; flash(`无法获取账户外观：${e}`,'error'); }
-  finally { if(appearanceRequest===request) appearanceRequest=null; }
-  if(state.page==='account') render(); else renderChrome();
- })();
- return request.promise;
-}
+const accountAppearance=createAccountAppearance({state,container:app,render,renderChrome,flash,cacheAvatar:cacheOnlineAvatar,
+ getAccounts:()=>invoke('list_microsoft_accounts'),getAppearance:()=>invoke('get_appearance'),
+ createPreview:(canvas,skin,cape,model)=>import('./appearance-preview.ts').then(m=>m.createAppearancePreview(canvas,skin,cape,model))});
+const {refreshAccountList,refreshPreview,refreshAppearance}=accountAppearance;
 const versionManager=createVersionManager({state,render,renderChrome,persist,loadCovers:loadInstalledCovers,flash,
  listVersions:gameDir=>invoke('list_versions',{gameDir}),installed:gameDir=>invoke('installed_versions',{gameDir}),listJava:()=>invoke('list_java')});
 const refreshInstalled=versionManager.refreshInstalled,refreshJava=versionManager.refreshJava,refresh=versionManager.refresh;
@@ -265,7 +171,7 @@ function renderOverlay() {
   const d=state.instanceSettingsView,savedSettings=getLaunchSettings(d.gameDir,d.version);
   renderer.overlay(InstanceSettingsDialog,{name:d.name,values:{...state,...savedSettings},saved:savedSettings,runtimes:Array.isArray(state.javaRuntimes)?state.javaRuntimes:[]},`instance-settings:${d.version}`);
  } else if(state.themeView) {
-  const d=state.themeView,cover=d.preview||(!d.removeCover?instanceCovers.get(instanceKey(d.gameDir,d.version)):null)||null;
+  const d=state.themeView,cover=d.preview||(!d.removeCover?instanceTheme.getCover(d.gameDir,d.version):null)||null;
   renderer.overlay(InstanceThemeDialog,{draft:d,cover,colors:instanceColors});
  } else if(state.profileView) {
   renderer.overlay(GameProfileDialog,{view:state.profileView},`profile:${state.profileView.version}`);
@@ -331,7 +237,7 @@ function updateSearchResults(kind) {
 app.addEventListener('pointerdown', event => { const edge=event.target.closest('[data-resize]'); if (edge && event.button===0 && isTauri()) getCurrentWindow().startResizeDragging(edge.dataset.resize).catch(e=>flash(`无法调整窗口大小：${e}`,'error')); });
 app.addEventListener('click', async event => {
  const themeReset=event.target.closest('[data-theme-reset]');
- if(themeReset) { const kind=themeReset.dataset.themeReset,revision=++imageRevision[kind];try { await imageStore('delete',kind);if(revision!==imageRevision[kind])return;setThemeImage(kind,null);flash('已恢复默认图片。'); } catch(e) { flash(`无法恢复默认图片：${e}`,'error'); } return; }
+ if(themeReset) {await appearanceController.reset(themeReset.dataset.themeReset);return;}
  const menuSummary=event.target.closest('.version-menu summary');
  app.querySelectorAll('.version-menu[open]').forEach(menu=>{ if(!menuSummary || menuSummary.parentElement!==menu) menu.open=false; });
  const windowControl=event.target.closest('[data-window]');
@@ -342,8 +248,8 @@ app.addEventListener('click', async event => {
  const profileShot=event.target.closest('[data-profile-shot]');if(profileShot&&state.profileView){const d=state.profileView,index=Number(profileShot.dataset.profileShot),data=d.images[index];if(data){d.preview={data,name:d.shots[index].name};renderOverlay();}return;}
  const instanceSettingsButton=event.target.closest('[data-instance-settings]');
  if(instanceSettingsButton){const version=instanceSettingsButton.dataset.instanceSettings,item=state.versions.find(v=>v.id===version&&v.installed);if(!item)return;const menu=instanceSettingsButton.closest('details');if(menu)menu.open=false;const view={version,gameDir:state.gameDir,name:item.name||version};state.instanceSettingsView=view;renderOverlay();void invoke('list_java').then(runtimes=>{if(state.instanceSettingsView!==view || !Array.isArray(runtimes))return;state.javaRuntimes=runtimes;renderOverlay();}).catch(()=>{});return;}
- const themeButton=event.target.closest('[data-instance-theme]');if(themeButton){const version=themeButton.dataset.instanceTheme,item=state.versions.find(v=>v.id===version&&v.installed);if(item){const original=getInstanceTheme(state.gameDir,version);state.themeView={version,gameDir:state.gameDir,name:item.name||version,...original,file:null,preview:null,removeCover:false,error:'',saving:false};renderOverlay();await loadInstanceCover(state.gameDir,version);if(state.themeView?.version===version)renderOverlay();}return;}
- const colorButton=event.target.closest('[data-instance-color]');if(colorButton&&state.themeView&&!state.themeView.saving&&instanceColors.includes(colorButton.dataset.instanceColor)){state.themeView.color=colorButton.dataset.instanceColor;renderOverlay();return;}
+ const themeButton=event.target.closest('[data-instance-theme]');if(themeButton){await instanceTheme.open(themeButton.dataset.instanceTheme);return;}
+ const colorButton=event.target.closest('[data-instance-color]');if(colorButton&&state.themeView){instanceTheme.setColor(colorButton.dataset.instanceColor);return;}
  const manageButton=event.target.closest('[data-manage-backups],[data-manage-worlds]');if(manageButton){await openManage(manageButton.hasAttribute('data-manage-backups')?'backups':'worlds',manageButton.dataset.manageBackups||manageButton.dataset.manageWorlds);return;}
  const restoreButton=event.target.closest('[data-manage-restore]');if(restoreButton&&state.manageView&&!state.manageView.busy){const item=state.manageView.items[Number(restoreButton.dataset.manageRestore)];if(item){state.manageView.confirm={action:'restore',item};renderOverlay();}return;}
  const manageDelete=event.target.closest('[data-manage-delete]');if(manageDelete&&state.manageView&&!state.manageView.busy){const item=state.manageView.items[Number(manageDelete.dataset.manageDelete)];if(item){state.manageView.confirm={action:'delete',item};renderOverlay();}return;}
@@ -409,7 +315,7 @@ app.addEventListener('click', async event => {
  if(action==='close-launch-view') { const crash=state.launchView?.crash;state.launchView=null;if(crash?.diagnosis)showCrashNotice(crash);renderOverlay();return; }
  if(action==='launch-account') {state.launchView=null;state.page='account';render();return;}
  const switchAccount=event.target.closest('[data-switch-account]');
- if(switchAccount && !state.accountBusy && !state.loginAttempt) {const uuid=switchAccount.dataset.switchAccount;if(uuid===state.account?.uuid)return;const previous={account:state.account,appearance:state.appearance,accountName:state.accountName,accountUuid:state.accountUuid,accountMode:state.accountMode,accountPreference:state.accountPreference,accountKnown:state.accountKnown};state.restoreAttempt=null;restoreTask=null;state.accountRestoring=false;state.accountBusy=true;state.appearance=null;state.account=null;state.accountPreference='microsoft';state.accountKnown=true;const target=state.savedAccounts.find(a=>a.uuid===uuid);state.accountName=target?.name||'';state.accountUuid=uuid;state.accountRestoreError='';void restoreOnlineAvatar(uuid);render();try{const result=await invoke('switch_microsoft_account',{uuid});if(result?.error || !result?.account){state.accountMode='offline';state.accountRestoreError=`账户恢复失败：${result?.error||'未找到保存的账户'}。可检查网络后重试或重新登录。`;persist();flash(state.accountRestoreError,'error');}else{const account=result.account;state.account=account;state.accountName=account.name;state.accountUuid=account.uuid;state.accountMode=state.accountPreference==='offline'?'offline':'microsoft';persist();await refreshAppearance();}}catch(e){Object.assign(state,previous);persist();flash(`无法切换账户：${e}`,'error');}finally{state.accountBusy=false;render();void refreshAccountList();}return;}
+ if(switchAccount && !state.accountBusy && !state.loginAttempt) {const uuid=switchAccount.dataset.switchAccount;if(uuid===state.account?.uuid)return;const previous={account:state.account,appearance:state.appearance,accountName:state.accountName,accountUuid:state.accountUuid,accountMode:state.accountMode,accountPreference:state.accountPreference,accountKnown:state.accountKnown};restoreAccount.cancel();state.accountBusy=true;state.appearance=null;state.account=null;state.accountPreference='microsoft';state.accountKnown=true;const target=state.savedAccounts.find(a=>a.uuid===uuid);state.accountName=target?.name||'';state.accountUuid=uuid;state.accountRestoreError='';void restoreOnlineAvatar(uuid);render();try{const result=await invoke('switch_microsoft_account',{uuid});if(result?.error || !result?.account){state.accountMode='offline';state.accountRestoreError=`账户恢复失败：${result?.error||'未找到保存的账户'}。可检查网络后重试或重新登录。`;persist();flash(state.accountRestoreError,'error');}else{const account=result.account;state.account=account;state.accountName=account.name;state.accountUuid=account.uuid;state.accountMode=state.accountPreference==='offline'?'offline':'microsoft';persist();await refreshAppearance();}}catch(e){Object.assign(state,previous);persist();flash(`无法切换账户：${e}`,'error');}finally{state.accountBusy=false;render();void refreshAccountList();}return;}
  if(action==='begin-login' && !state.accountRestoring) {
   const attempt={}; state.loginAttempt=attempt;state.browserPrompt=null;render();
   try { const prompt=await invoke('begin_microsoft_login'); if(state.loginAttempt!==attempt) return; state.browserPrompt=prompt;render(); const account=await invoke('complete_microsoft_login'); if(state.loginAttempt!==attempt) return; if(state.account?.uuid!==account.uuid)state.appearance=null;state.account=account;state.accountName=account.name;state.accountUuid=account.uuid;state.accountMode='microsoft';state.accountKnown=true;state.accountPreference='microsoft';state.accountRestoreError='';state.loginAttempt=null;state.browserPrompt=null;void restoreOnlineAvatar(account.uuid);persist();render();if(account.remembered===false)flash(`登录成功，但无法保存登录状态：${account.rememberError || '请检查系统凭据库。'}`,'error');await refreshAppearance();void refreshAccountList(); }
@@ -421,7 +327,7 @@ app.addEventListener('click', async event => {
  if(action==='open-microsoft-login') { try { await invoke('open_microsoft_login'); } catch(e) { flash(String(e),'error'); } return; }
  if(action==='use-offline' || action==='continue-offline') { state.accountMode='offline';state.accountPreference='offline';persist();render();return; }
  if(action==='use-microsoft' && (state.account || state.accountKnown)) { state.accountMode=state.account?'microsoft':'offline';state.accountPreference='microsoft';void restoreOnlineAvatar(state.account?.uuid||state.accountUuid);persist();render();if(!state.account)void restoreAccount({notify:false});return; }
- if(action==='logout-microsoft') { const oldUuid=state.account?.uuid||state.accountUuid;state.restoreAttempt=null;restoreTask=null;state.accountRestoring=false;state.accountBusy=true;render();try { await invoke('logout_microsoft'); } catch(e) { flash(String(e),'error'); } finally { state.account=null;state.accountName='';state.accountUuid='';cacheOnlineAvatar(oldUuid,null);state.accountMode='offline';state.accountKnown=false;state.accountPreference='offline';state.accountRestoreError='';state.appearance=null;state.previewCapeId='';state.accountBusy=false;persist();render();void refreshAccountList(); } return; }
+ if(action==='logout-microsoft') { const oldUuid=state.account?.uuid||state.accountUuid;restoreAccount.cancel();state.accountBusy=true;render();try { await invoke('logout_microsoft'); } catch(e) { flash(String(e),'error'); } finally { state.account=null;state.accountName='';state.accountUuid='';cacheOnlineAvatar(oldUuid,null);state.accountMode='offline';state.accountKnown=false;state.accountPreference='offline';state.accountRestoreError='';state.appearance=null;state.previewCapeId='';state.accountBusy=false;persist();render();void refreshAccountList(); } return; }
  if(action==='choose-skin' || action==='choose-cape') { const kind=action==='choose-skin'?'skin':'cape';try { const path=await openDialog({multiple:false,directory:false,filters:[{name:'PNG 图片',extensions:['png']}]}); if(typeof path!=='string') return;const data=await invoke('preview_texture',{path,kind});const file={path,data,name:path.split(/[\\/]/).pop(),...(kind==='skin'?{model:state.skinModel}:{})};if(kind==='skin') {state.localSkin=file;saveLocalSkin(file);}else state.localCape=file;render(); } catch(e) { flash(`无法预览图片：${e}`,'error'); } return; }
  if(action==='apply-offline-skin' && state.localSkin && !usingOnlineAccount() && selected()?.installed) {const version=state.selected,gameDir=state.gameDir,skin=state.localSkin.data,username=state.username;state.accountBusy=true;render();try{await invoke('apply_offline_skin',{gameDir,version,username,skin});offlineSkinInstances[instanceKey(gameDir,version)]=true;localStorage.setItem('ccl-offline-skin-instances',JSON.stringify(offlineSkinInstances));flash('皮肤已保存到实例；请确保已安装 CustomSkinLoader。');}catch(e){flash(`无法应用离线皮肤：${e}`,'error');}finally{state.accountBusy=false;render();}return;}
  if(action==='find-offline-skin-mod') {state.contentKind='mod';state.contentSource='modrinth';state.contentTarget=state.selected;state.contentQuery='CustomSkinLoader';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];state.page='content';render();void searchContent(true);return;}
@@ -446,9 +352,9 @@ app.addEventListener('click', async event => {
  if(action==='refresh-game-profile' && state.profileView && !state.profileView.loading){const d=state.profileView;void gameProfile.loadStats(d);await loadProfileScreenshots(d);}
  if(action==='open-screenshot-folder' && state.profileView){const d=state.profileView;try{await invoke('open_screenshot_folder',{gameDir:d.gameDir,version:d.version});}catch(e){flash(`无法打开截图目录：${e}`,'error');}}
 
- if(action==='close-instance-theme' && state.themeView && !state.themeView.saving){if(state.themeView.preview)URL.revokeObjectURL(state.themeView.preview);state.themeView=null;renderOverlay();}
- if(action==='remove-instance-cover' && state.themeView && !state.themeView.saving){const d=state.themeView;if(d.preview)URL.revokeObjectURL(d.preview);d.preview=null;d.file=null;d.removeCover=true;renderOverlay();}
- if(action==='save-instance-theme' && state.themeView && !state.themeView.saving){const d=state.themeView,key=instanceKey(d.gameDir,d.version);instanceCoverRevision.set(key,(instanceCoverRevision.get(key)||0)+1);d.description=String(app.querySelector('#instance-description')?.value||'').slice(0,180);d.saving=true;d.error='';renderOverlay();try{if(d.file)await imageStore('put',`instance-cover:${key}`,d.file);else if(d.removeCover)await imageStore('delete',`instance-cover:${key}`);const old=instanceCovers.get(key);if((d.file||d.removeCover)&&old){URL.revokeObjectURL(old);instanceCovers.delete(key);}if(d.file)instanceCovers.set(key,URL.createObjectURL(d.file));instanceThemes[key]={color:d.color,description:d.description,hasCover:d.file?true:d.removeCover?false:d.hasCover};localStorage.setItem('ccl-instance-themes',JSON.stringify(instanceThemes));if(d.preview)URL.revokeObjectURL(d.preview);state.themeView=null;render();flash('实例主题已保存。');}catch(e){d.error=String(e);d.saving=false;renderOverlay();}}
+ if(action==='close-instance-theme')instanceTheme.close();
+ if(action==='remove-instance-cover')instanceTheme.removeCover();
+ if(action==='save-instance-theme')await instanceTheme.save(String(app.querySelector('#instance-description')?.value||''));
 
  if(action==='close-manage' && state.manageView && !state.manageView.busy){state.manageView=null;renderOverlay();}
  if(action==='switch-worlds' && state.manageView && !state.manageView.busy){await openManage('worlds',state.manageView.version,state.manageView.gameDir);}
@@ -504,13 +410,10 @@ app.addEventListener('click', async event => {
  }
 });
 app.addEventListener('change', async event => {
- if(event.target.matches('[data-instance-cover]') && state.themeView){const d=state.themeView,file=event.target.files?.[0];if(!file)return;try{await validateThemeImage(file);if(state.themeView!==d)return;if(d.preview)URL.revokeObjectURL(d.preview);d.preview=URL.createObjectURL(file);d.file=file;d.removeCover=false;d.error='';renderOverlay();}catch(e){if(state.themeView===d){d.error=String(e);renderOverlay();}}return;}
+ if(event.target.matches('[data-instance-cover]') && state.themeView){const file=event.target.files?.[0];if(file)await instanceTheme.chooseCover(file);return;}
 
  if(event.target.dataset.themeImage) {
-  const kind=event.target.dataset.themeImage,file=event.target.files?.[0];event.target.value='';if(!file)return;
-  const revision=++imageRevision[kind];
-  try { await validateThemeImage(file);if(revision!==imageRevision[kind])return;await imageStore('put',kind,file);if(revision!==imageRevision[kind])return;setThemeImage(kind,file);flash('图片已保存。'); }
-  catch(e) { flash(`无法使用图片：${e}`,'error'); } return;
+  const kind=event.target.dataset.themeImage,file=event.target.files?.[0];event.target.value='';if(file)await appearanceController.choose(kind,file);return;
  }
  if(event.target.id==='memory-mode' || event.target.id==='instance-memory-mode' || ['overrideJava','overrideMemory','overrideArgs'].includes(event.target.name)) {syncMemoryControls();return;}
  if(event.target.id==='server-status') { state.serverStatus=event.target.value;state.serverPage=0;updateSearchResults('server');return; }

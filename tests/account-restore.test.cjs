@@ -34,7 +34,7 @@ function boot({preference='microsoft', known=false, restore, logout, launch, app
   w.appVersion = require('../package.json').version;
   w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
   const source=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');
-  w.eval(source);
+  w.eval('"use strict";\n'+source+'\nwindow.render=render;window.refreshMods=refreshMods;');
   const click = selector => { const el=w.document.querySelector(selector);assert.ok(el,selector);el.click(); };
   return {w, calls, click, close:()=>w.close()};
 }

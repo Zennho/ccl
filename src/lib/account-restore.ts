@@ -23,7 +23,7 @@ interface AccountRestoreOptions {
 }
 export function createAccountRestorer({state,restore,restoreAvatar,refreshAppearance,render,persist,flash}:AccountRestoreOptions) {
   let pending: Promise<MicrosoftAccount | null> | null = null;
-  return function restoreAccount({notify=false}:{notify?:boolean} = {}): Promise<MicrosoftAccount | null> {
+  function restoreAccount({notify=false}:{notify?:boolean} = {}): Promise<MicrosoftAccount | null> {
     if (pending) return pending;
     const attempt = {};
     state.restoreAttempt = attempt; state.accountRestoring = true; state.accountRestoreError = ''; render();
@@ -55,5 +55,7 @@ export function createAccountRestorer({state,restore,restoreAvatar,refreshAppear
     pending = task;
     void task.finally(() => { if (pending === task) pending = null; });
     return task;
-  };
+  }
+  restoreAccount.cancel = () => { state.restoreAttempt = null; state.accountRestoring = false; pending = null; };
+  return restoreAccount;
 }

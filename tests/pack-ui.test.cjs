@@ -35,7 +35,7 @@ function boot(options={}){
  };
  w.appVersion=require('../package.json').version;
  w.eval(require('esbuild').transformSync(fs.readFileSync(path.join(__dirname,'../src/job-manager.ts'),'utf8'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,''));
- const src=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');w.eval(src);
+ const src=fs.readFileSync(path.join(__dirname,'../src/main.js'),'utf8').replace(/^import .*;\r?\n/gm,'').replace(/const icons = \{[^\r\n]+\};/,'const icons = window.__icons;');w.eval('"use strict";\n'+src+'\nwindow.render=render;window.refreshMods=refreshMods;');
  const click=selector=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.click();};
  const change=(selector,value)=>{const el=w.document.querySelector(selector);assert.ok(el,selector);el.value=value;el.dispatchEvent(new w.Event('change',{bubbles:true}));};
  return {w,calls,pending,click,change,close:()=>w.close()};

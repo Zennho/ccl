@@ -27,6 +27,11 @@ module.exports=function installReactRenderer(window) {
  window.syncMemoryFields=window.syncMemoryControls;
  load(window,'lib/multiplayer.ts',['createMultiplayer','copyText']);
  load(window,'lib/version-manager.ts',['createVersionManager']);
+ load(window,'lib/avatar-store.ts',['createAvatarStore']);
+ load(window,'lib/account-appearance.ts',['createAccountAppearance']);
+ load(window,'lib/instance-theme.ts',['createInstanceTheme','instanceColors','instanceKey']);
+ load(window,'lib/launcher-state.ts',['readSettings','createInitialState','createTheme','persistSettings']);
+ load(window,'lib/appearance-controller.ts',['createAppearanceController']);
  load(window,'react/renderer.tsx',['createRenderer']);
  load(window,'react/pages.tsx',['Icon','HomePage','VersionsPage','JavaPage']);
  load(window,'react/instance-settings.tsx',['InstanceSettingsDialog']);
