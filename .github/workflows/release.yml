@@ -24,12 +24,12 @@ jobs:
             bundles: deb,appimage
             artifact: linux-x64
           - name: macOS Apple Silicon
-            os: macos-latest
+            os: macos-15-intel
             target: aarch64-apple-darwin
             bundles: dmg
             artifact: macos-arm64
           - name: macOS Intel
-            os: macos-latest
+            os: macos-15-intel
             target: x86_64-apple-darwin
             bundles: dmg
             artifact: macos-x64
