@@ -64,6 +64,7 @@ export function createAccountAppearance({
         ? accounts.filter((a) => typeof a?.uuid === 'string' && typeof a?.name === 'string')
         : [];
       if (state.page === 'account') render();
+      else renderChrome();
     } catch {
       /* Existing account remains usable when the credential store is unavailable. */
     }

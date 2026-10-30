@@ -103,8 +103,15 @@ export function createLauncherHandler({
         }
         return true;
       case 'confirm-install':
-        if (state.installDraft) {
-          const draft = { ...state.installDraft, addons: [...state.installDraft.addons] };
+        if (
+          state.installDraft &&
+          (state.installDraft.loader === 'vanilla' ||
+            !['checking', 'unavailable'].includes(
+              state.installDraft.compatibility[state.installDraft.loader],
+            ))
+        ) {
+          const { version, loader, addons } = state.installDraft;
+          const draft = { version, loader, addons: [...addons] };
           state.installDraft = null;
           renderOverlay();
           queueVersion(draft);

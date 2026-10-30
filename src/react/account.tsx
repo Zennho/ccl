@@ -40,11 +40,13 @@ export function AccountPage({
   usingOnline,
   playerName,
   selected,
+  skinSyncEnabled,
 }: {
   state: AccountState;
   usingOnline: boolean;
   playerName: string;
   selected?: GameVersion;
+  skinSyncEnabled: boolean;
 }) {
   const signed = !!s.account,
     online = s.accountMode === 'microsoft' && signed,
@@ -232,6 +234,20 @@ export function AccountPage({
                 选择皮肤
               </button>
             </div>
+            <div className="appearance-status">
+              <span>
+                {localSkin
+                  ? !usingOnline && skinSyncEnabled
+                    ? '本地皮肤 · 已开启实例启动同步'
+                    : '本地皮肤 · 仅预览'
+                  : s.appearance?.skin
+                    ? '正版账户皮肤'
+                    : '未选择皮肤'}
+              </span>
+              <span>
+                {localCape ? '本地披风 · 仅预览' : s.previewCapeId ? '账户披风预览' : '无披风预览'}
+              </span>
+            </div>
             <div className="skin-controls">
               <div className="skin-source">
                 <strong>
@@ -244,7 +260,9 @@ export function AccountPage({
                 </strong>
                 <small>
                   {localSkin
-                    ? '本地预览 · 尚未应用'
+                    ? !usingOnline && skinSyncEnabled
+                      ? '本地预览 · 此实例启动时同步'
+                      : '本地预览 · 尚未应用'
                     : s.appearance?.skin
                       ? '已从账户加载'
                       : signed

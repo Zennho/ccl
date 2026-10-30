@@ -29,6 +29,15 @@ export function createContentHandler({
   packs,
 }: Options): ClickHandler {
   return (target) => {
+    const tab = target.closest<HTMLElement>('[data-content-view]');
+    if (tab) {
+      const view = tab.dataset.contentView;
+      if (view === 'browse' || view === 'installed') {
+        state.contentView = view;
+        render();
+      }
+      return true;
+    }
     const pageButton = target.closest<HTMLElement>('[data-content-page]');
     if (pageButton && !state.contentBusy) {
       const page = Number(pageButton.dataset.contentPage);

@@ -84,6 +84,8 @@ export function installApplicationEvents({
     refreshAppearance: () => account.appearance.refreshAppearance({ reuse: true }),
     refreshMemory: system.refreshMemoryInfo,
     refreshJava: instances.versions.refreshJava,
+    getJavaRequirement: (gameDir, version) =>
+      invoke<number | null>('required_java_version', { gameDir, version }),
     refreshAddresses: multiplayer.refreshAddresses,
     refreshServers: multiplayer.refreshPublicServers,
     refreshMods: content.mods.refreshMods,
@@ -176,6 +178,13 @@ export function installApplicationEvents({
     settings,
     multiplayer,
   });
+  container.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || event.isComposing) return;
+    const menu = container.querySelector<HTMLDetailsElement>('[data-home-version-menu][open]');
+    if (!menu) return;
+    menu.open = false;
+    menu.querySelector<HTMLElement>('summary')?.focus();
+  });
   installClickDispatcher({
     container,
     handlers: [
@@ -191,6 +200,11 @@ export function installApplicationEvents({
     ],
     beforeDispatch: (target) => {
       if (!target.closest('[data-theme-reset]')) closeVersionMenus(container, target);
+      container
+        .querySelectorAll<HTMLDetailsElement>('[data-home-version-menu][open]')
+        .forEach((menu) => {
+          if (!menu.contains(target) || target.closest('button')) menu.open = false;
+        });
     },
     onError: (error) => flash(`操作失败：${error}`, 'error'),
   });

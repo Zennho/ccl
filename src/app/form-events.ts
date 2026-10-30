@@ -110,6 +110,15 @@ export function installFormEvents(options: Options): void {
       renderMods();
       return;
     }
+    if (target.id === 'installed-kind') {
+      const form = container.querySelector<HTMLFormElement>('#content-form');
+      const field = form?.elements.namedItem('kind');
+      if (form && field instanceof HTMLSelectElement) {
+        field.value = target.value;
+        await options.content.changeFilters(form);
+      }
+      return;
+    }
     if (target.id === 'contentTarget') {
       await options.content.selectTarget(target.value);
       return;
@@ -128,6 +137,7 @@ export function installFormEvents(options: Options): void {
       state.installDraft.addons = target.checked
         ? [...new Set([...selected, target.value])]
         : selected.filter((value) => value !== target.value);
+      renderOverlay();
       return;
     }
     if (

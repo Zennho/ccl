@@ -9,6 +9,7 @@ interface Options {
   refreshAppearance: () => Promise<unknown>;
   refreshMemory: AsyncAction;
   refreshJava: AsyncAction;
+  getJavaRequirement: (gameDir: string, version: string) => Promise<number | null>;
   refreshAddresses: AsyncAction;
   refreshServers: AsyncAction;
   refreshMods: AsyncAction;
@@ -19,6 +20,7 @@ interface Options {
 }
 export function createNavigationHandler(options: Options): ClickHandler {
   const { state, render } = options;
+  let javaRequest = 0;
   async function open(page: string) {
     state.page = page;
     render();
@@ -27,7 +29,26 @@ export function createNavigationHandler(options: Options): ClickHandler {
       if (state.account && !state.appearance) void options.refreshAppearance();
     }
     if (page === 'settings') void options.refreshMemory();
-    if (page === 'java') await options.refreshJava();
+    if (page === 'java') {
+      const request = ++javaRequest,
+        gameDir = state.gameDir,
+        version = state.selected;
+      state.javaRequirement = null;
+      state.javaRequirementLoading = !!version;
+      render();
+      const requirement = version
+        ? options.getJavaRequirement(gameDir, version).catch(() => null)
+        : Promise.resolve(null);
+      void requirement.then((value) => {
+        if (request !== javaRequest || state.gameDir !== gameDir || state.selected !== version)
+          return;
+        state.javaRequirement =
+          typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
+        state.javaRequirementLoading = false;
+        if (state.page === 'java') render();
+      });
+      await options.refreshJava();
+    }
     if (page === 'multiplayer' && state.lanView === 'room') await options.refreshAddresses();
     if (page === 'multiplayer' && state.lanView === 'servers' && !state.serverCatalog)
       await options.refreshServers();

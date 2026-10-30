@@ -1,6 +1,6 @@
 import React from 'react';
 import { Icon } from './icons';
-import type { JavaRuntime } from './types';
+import type { GameVersion, JavaRuntime } from './types';
 
 type JavaPageProps = {
   runtimes: JavaRuntime[];
@@ -8,8 +8,20 @@ type JavaPageProps = {
   loading: boolean;
   deleteIndex: number | null;
   hasJob: (key: string) => boolean;
+  selectedVersion?: GameVersion;
+  requiredJava: number | null;
+  requirementLoading: boolean;
 };
-export function JavaPage({ runtimes, javaPath, loading, deleteIndex, hasJob }: JavaPageProps) {
+export function JavaPage({
+  runtimes,
+  javaPath,
+  loading,
+  deleteIndex,
+  hasJob,
+  selectedVersion,
+  requiredJava,
+  requirementLoading,
+}: JavaPageProps) {
   const descriptions: Record<number, string> = {
     8: '适用于多数旧版本',
     17: '适用于部分较新版本',
@@ -27,6 +39,29 @@ export function JavaPage({ runtimes, javaPath, loading, deleteIndex, hasJob }: J
         <button className="outline-btn" data-action="refresh-java" disabled={loading}>
           <Icon name="refresh-cw" size={16} /> {loading ? '正在检测' : '检测本机 Java'}
         </button>
+      </div>
+      <div className="java-guidance">
+        <strong>
+          {selectedVersion
+            ? `当前实例：${selectedVersion.name || selectedVersion.id}`
+            : '尚未选择实例'}
+        </strong>
+        <span>
+          {requirementLoading
+            ? '正在读取 Java 要求…'
+            : requiredJava
+              ? `游戏元数据要求 Java ${requiredJava}；实例覆盖设置可能不同。`
+              : selectedVersion
+                ? '该实例未提供明确的 Java 要求，请手动确认。'
+                : '选择实例后可查看其 Java 要求。'}
+        </span>
+        {requiredJava && (
+          <small>
+            {runtimes.some((runtime) => runtime.major === requiredJava)
+              ? '已检测到对应版本，可在下方选择。'
+              : '尚未检测到对应版本，请在下方下载安装或手动添加。'}
+          </small>
+        )}
       </div>
       <div className="section-title">
         <div>
@@ -46,6 +81,7 @@ export function JavaPage({ runtimes, javaPath, loading, deleteIndex, hasJob }: J
                 <Icon name="download" size={16} />
               </div>
               <strong>{major}</strong>
+              {major === requiredJava && <span className="java-recommended">游戏要求</span>}
               <p>{descriptions[major]}</p>
               <button data-java-install={major} disabled={busy || installed || loading}>
                 {installed ? '已安装' : busy ? '任务中' : '下载安装'}

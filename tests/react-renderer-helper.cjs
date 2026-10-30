@@ -11,7 +11,7 @@ module.exports=function installReactRenderer(window) {
  global.window=window;global.document=window.document;global.navigator=window.navigator;
  window.React=require('react');window.useState=window.React.useState;window.createRoot=require('react-dom/client').createRoot;
  window.flushSync=require('react-dom').flushSync;
- const icons=require('lucide');for(const name of ['Blocks','Box','ChevronDown','ChevronRight','Compass','Download','FolderOpen','Gamepad2','Globe2','HardDrive','Layers3','LayoutGrid','Monitor','MoreHorizontal','Minus','Play','RefreshCw','Settings2','Square','UserRound','X','Zap'])window[name]=icons[name];
+ const icons=require('lucide');for(const name of ['Blocks','Box','ChevronDown','ChevronRight','Compass','Download','FolderOpen','Gamepad2','Globe2','HardDrive','Layers3','LayoutGrid','Monitor','MoreHorizontal','Minus','Play','RefreshCw','Settings','Settings2','Square','UserRound','X','Zap'])window[name]=icons[name];
  load(window,'lib/appearance.ts',['appearanceDefaults','clampAppearance','bannerPeriod','imageStore','validateThemeImage']);
  load(window,'lib/thumbnails.ts',['createThumbnailLoader']);
  load(window,'lib/input-controller.ts',['createInputController']);

@@ -57,12 +57,22 @@ function JobCard({ job }: { job: DownloadJob }) {
       </div>
       <div className="job-progress-line">
         <div className="progress-track">
-          <i className="job-track" style={{ width: `${job.status === 'done' ? 100 : percent}%` }} />
+          <i
+            className={`job-track${active && !job.total ? ' indeterminate' : ''}`}
+            style={{
+              width: `${active && !job.total ? 30 : job.status === 'done' ? 100 : percent}%`,
+            }}
+          />
         </div>
         <span className="job-count">{jobCount(job)}</span>
       </div>
       <div className="job-metrics">{job.metrics || ''}</div>
-      {job.error && <p className="job-error">{job.error}</p>}
+      {job.error && (
+        <details className="job-error">
+          <summary>{job.error.split('\n')[0].slice(0, 120)}</summary>
+          <p>{job.error}</p>
+        </details>
+      )}
       <div className="job-actions">
         {active && (
           <button
@@ -90,6 +100,13 @@ function JobCard({ job }: { job: DownloadJob }) {
 export function DownloadsPage({ jobs, limit }: { jobs: DownloadJob[]; limit: number }) {
   const running = jobs.filter((j) => j.status === 'running' || j.status === 'canceling').length,
     active = jobs.some((j) => ['queued', 'running', 'canceling'].includes(j.status));
+  const recent = jobs.slice().reverse();
+  const activeJobs = recent.filter((job) =>
+    ['queued', 'running', 'canceling'].includes(job.status),
+  );
+  const finishedJobs = recent
+    .filter((job) => !['queued', 'running', 'canceling'].includes(job.status))
+    .sort((a, b) => Number(b.status === 'failed') - Number(a.status === 'failed'));
   return (
     <>
       <div className="page-heading inner-heading">
@@ -119,19 +136,32 @@ export function DownloadsPage({ jobs, limit }: { jobs: DownloadJob[]; limit: num
         </select>
         <span>修改后对等待中的任务生效</span>
       </div>
-      <div className="section-title">
-        <div>
-          <h3>
-            任务列表 <span className="count">{jobs.length}</span>
-          </h3>
-        </div>
-      </div>
       <div id="job-list">
         {jobs.length ? (
-          jobs
-            .slice()
-            .reverse()
-            .map((job) => <JobCard key={job.id} job={job} />)
+          <>
+            <section data-job-group="active">
+              <div className="section-title">
+                <h3>
+                  进行中 <span className="count">{activeJobs.length}</span>
+                </h3>
+              </div>
+              {activeJobs.length ? (
+                activeJobs.map((job) => <JobCard key={job.id} job={job} />)
+              ) : (
+                <p className="jobs-group-empty">暂无进行中的任务</p>
+              )}
+            </section>
+            <section data-job-group="finished">
+              <div className="section-title">
+                <h3>
+                  已结束 <span className="count">{finishedJobs.length}</span>
+                </h3>
+              </div>
+              {finishedJobs.map((job) => (
+                <JobCard key={job.id} job={job} />
+              ))}
+            </section>
+          </>
         ) : (
           <div className="empty-state job-empty">
             <Icon name="download" size={27} />

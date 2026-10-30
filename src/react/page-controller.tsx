@@ -21,6 +21,8 @@ interface Options {
   hasJob: (key: string) => boolean;
   usingOnline: () => boolean;
   playerName: () => string;
+  playerStatus: () => string;
+  isSkinSyncEnabled: (gameDir: string, version: string) => boolean;
   filteredServers: () => PublicServer[];
   hydrateThumbnails: () => void;
 }
@@ -35,6 +37,8 @@ export function createPageController({
   hasJob,
   usingOnline,
   playerName,
+  playerStatus,
+  isSkinSyncEnabled,
   filteredServers,
   hydrateThumbnails,
 }: Options) {
@@ -96,6 +100,8 @@ export function createPageController({
       const version = selected();
       renderer.page(HomePage, {
         version,
+        versions: state.versions,
+        accountStatus: playerStatus(),
         visual: versionVisual(version),
         description: version?.installed
           ? getInstanceTheme(state.gameDir, version.id).description
@@ -114,6 +120,9 @@ export function createPageController({
         loading: state.javaLoading,
         deleteIndex: state.javaDelete,
         hasJob,
+        selectedVersion: selected(),
+        requiredJava: state.javaRequirement,
+        requirementLoading: state.javaRequirementLoading,
       });
       return;
     }
@@ -135,6 +144,7 @@ export function createPageController({
         usingOnline: usingOnline(),
         playerName: playerName(),
         selected: selected(),
+        skinSyncEnabled: isSkinSyncEnabled(state.gameDir, state.selected),
       });
       return;
     }

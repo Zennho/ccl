@@ -103,6 +103,8 @@ export interface LauncherState {
   online: boolean;
   javaRuntimes: JavaRuntime[];
   javaLoading: boolean;
+  javaRequirement: number | null;
+  javaRequirementLoading: boolean;
   javaDelete: number | null;
   versionDelete: VersionDelete | null;
   instanceView: (InstanceOverviewView & { gameDir: string }) | null;
@@ -111,6 +113,7 @@ export interface LauncherState {
   themeView: ThemeDraft | null;
   profileView: ProfileView | null;
   versionDeleting: boolean;
+  contentView: 'browse' | 'installed';
   contentSource: string;
   contentKind: string;
   contentQuery: string;
@@ -161,7 +164,12 @@ export interface LauncherState {
   modDelete: string[] | null;
   jobs: Job[];
   jobLimit: number;
-  installDraft: { version: string; loader: string; addons: string[] } | null;
+  installDraft: {
+    version: string;
+    loader: string;
+    addons: string[];
+    compatibility: Record<string, 'checking' | 'available' | 'unavailable' | 'unknown'>;
+  } | null;
 }
 interface SavedTheme {
   bannerOpacity?: number;
@@ -285,6 +293,8 @@ export function createInitialState(saved: SavedSettings): LauncherState {
     online: false,
     javaRuntimes: [],
     javaLoading: false,
+    javaRequirement: null,
+    javaRequirementLoading: false,
     javaDelete: null,
     versionDelete: null,
     instanceView: null,
@@ -293,6 +303,7 @@ export function createInitialState(saved: SavedSettings): LauncherState {
     themeView: null,
     profileView: null,
     versionDeleting: false,
+    contentView: 'browse',
     contentSource: 'modrinth',
     contentKind: 'mod',
     contentQuery: '',

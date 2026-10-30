@@ -104,6 +104,67 @@ pub fn runtime_dir(dir: &Path, version: &str, metadata: &Value) -> PathBuf {
         dir.to_path_buf()
     }
 }
+/// Query the same upstream metadata used by installation. Errors remain unknown to the UI.
+#[tauri::command]
+pub async fn loader_compatibility(game_version: String, loader: String) -> ResultT<bool> {
+    version_id(&game_version)?;
+    let client = http_client()?;
+    if loader == "fabric" || loader == "quilt" {
+        let endpoint = loader_root(&loader)?;
+        let versions = json_request(
+            &client,
+            &format!("{endpoint}/versions/loader/{game_version}"),
+        )
+        .await?;
+        return versions
+            .as_array()
+            .map(|items| !items.is_empty())
+            .ok_or_else(|| "加载器列表格式无效".to_string());
+    }
+    let (url, prefix) = if loader == "forge" {
+        (
+            "https://maven.minecraftforge.net/net/minecraftforge/forge/maven-metadata.xml",
+            format!("{game_version}-"),
+        )
+    } else if loader == "neoforge" {
+        let parts: Vec<_> = game_version.split('.').collect();
+        if parts.first() != Some(&"1")
+            || parts.len() < 2
+            || !parts[1].chars().all(|c| c.is_ascii_digit())
+            || parts
+                .get(2)
+                .is_some_and(|p| !p.chars().all(|c| c.is_ascii_digit()))
+        {
+            return Ok(false);
+        }
+        (
+            "https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml",
+            format!("{}.{}.", parts[1], parts.get(2).copied().unwrap_or("0")),
+        )
+    } else {
+        return Err("不支持该加载器".into());
+    };
+    let text = client
+        .get(url)
+        .timeout(Duration::from_secs(15))
+        .send()
+        .await
+        .map_err(|e| e.to_string())?
+        .error_for_status()
+        .map_err(|e| e.to_string())?
+        .text()
+        .await
+        .map_err(|e| e.to_string())?;
+    if !text.contains("<metadata") || !text.contains("</metadata>") {
+        return Err("加载器元数据格式无效".into());
+    }
+    Ok(text
+        .split("<version>")
+        .skip(1)
+        .filter_map(|s| s.split("</version>").next())
+        .any(|v| v.starts_with(&prefix) && !v.contains("beta") && !v.contains("alpha")))
+}
+
 #[tauri::command]
 pub async fn install_loader(
     app: tauri::AppHandle,

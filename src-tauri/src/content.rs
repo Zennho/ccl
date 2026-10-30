@@ -1052,6 +1052,39 @@ pub struct ModVersion {
     name: String,
     number: String,
     date: String,
+    required_dependencies: Option<Vec<String>>,
+}
+
+fn required_mod_dependencies(version: &Value, source: &str) -> Option<Vec<String>> {
+    let dependencies = version["dependencies"].as_array()?;
+    let mut names = Vec::new();
+    for dependency in dependencies {
+        let required = if source == "modrinth" {
+            dependency["dependency_type"].as_str() == Some("required")
+        } else {
+            dependency["relationType"].as_u64() == Some(3)
+        };
+        if !required {
+            continue;
+        }
+        let label = if source == "modrinth" {
+            dependency["project_id"]
+                .as_str()
+                .map(str::to_string)
+                .or_else(|| {
+                    dependency["version_id"]
+                        .as_str()
+                        .map(|id| format!("版本 {id}"))
+                })
+        } else {
+            dependency["modId"].as_u64().map(|id| id.to_string())
+        }
+        .unwrap_or_else(|| "未知依赖".to_string());
+        if !names.contains(&label) {
+            names.push(label);
+        }
+    }
+    Some(names)
 }
 
 // Records cover CurseForge and offline installations; Modrinth hashes also recognize
@@ -1359,6 +1392,7 @@ pub async fn list_mod_versions(
                 v["id"].as_u64()?.to_string()
             };
             Some(ModVersion {
+                required_dependencies: required_mod_dependencies(v, &source),
                 id,
                 name: v[if source == "modrinth" {
                     "name"
@@ -1478,6 +1512,7 @@ pub async fn list_pack_versions(
                 ("displayName", "fileName", "fileDate")
             };
             Some(ModVersion {
+                required_dependencies: None,
                 id,
                 name: v[name].as_str().unwrap_or("未命名版本").to_string(),
                 number: v[number].as_str().unwrap_or("").to_string(),
@@ -3219,6 +3254,26 @@ async fn install_modpack_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn required_dependency_preview_distinguishes_missing_and_optional_metadata() {
+        assert_eq!(required_mod_dependencies(&json!({}), "modrinth"), None);
+        assert_eq!(
+            required_mod_dependencies(
+                &json!({"dependencies":[{"dependency_type":"required","project_id":"fabric-api"},{"dependency_type":"optional","project_id":"ignored"},{"dependency_type":"required","version_id":"v2"}]}),
+                "modrinth"
+            ),
+            Some(vec!["fabric-api".to_string(), "版本 v2".to_string()])
+        );
+        assert_eq!(
+            required_mod_dependencies(
+                &json!({"dependencies":[{"relationType":3,"modId":42},{"relationType":2,"modId":8}]}),
+                "curseforge"
+            ),
+            Some(vec!["42".to_string()])
+        );
+    }
+
     use std::io::{Cursor, Write};
 
     fn pack_archive(path: &str) -> Vec<u8> {

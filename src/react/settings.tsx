@@ -219,10 +219,6 @@ export function SettingsPage(p: SettingsProps) {
           <p>调整游戏运行环境与启动参数。</p>
         </div>
       </div>
-      <div id="update-panel">
-        <UpdatePanel {...p} />
-      </div>
-      <AppearanceSettings theme={p.theme} />
       <form id="settings-form">
         <section className="settings-section">
           <SettingHeading
@@ -368,64 +364,71 @@ export function SettingsPage(p: SettingsProps) {
             </p>
           </div>
         </section>
-        <section className="settings-section">
-          <SettingHeading
-            icon="zap"
-            index="03 / LAUNCH OPTIONS"
-            title="启动参数"
-            description="按需调整 Java 和游戏启动方式。"
-          />
-          <div className="field">
-            <label className="option-check">
-              <input name="optimize" type="checkbox" defaultChecked={p.optimize} /> 启用 G1
-              垃圾回收优化
-            </label>
-            <p>使用 Java 内置的 G1GC；自定义 JVM 参数可覆盖或补充设置。</p>
-          </div>
-          <div className="field">
-            <label htmlFor="jvmArgs">
-              自定义 JVM 参数 <span>JVM ARGUMENTS</span>
-            </label>
-            <input
-              id="jvmArgs"
-              name="jvmArgs"
-              defaultValue={p.jvmArgs}
-              placeholder="例如 -XX:MaxGCPauseMillis=100"
+        <details className="settings-advanced" data-settings-advanced>
+          <summary>
+            高级设置 <small>启动参数与网络代理</small>
+          </summary>
+          <section className="settings-section">
+            <SettingHeading
+              icon="zap"
+              index="03 / LAUNCH OPTIONS"
+              title="启动参数"
+              description="按需调整 Java 和游戏启动方式。"
             />
-            <p>用空格分隔，带空格的值可用引号包裹。</p>
-          </div>
-          <div className="field">
-            <label htmlFor="gameArgs">
-              自定义游戏参数 <span>GAME ARGUMENTS</span>
-            </label>
-            <input
-              id="gameArgs"
-              name="gameArgs"
-              defaultValue={p.gameArgs}
-              placeholder="例如 --width 1280 --height 720"
+            <div className="field">
+              <label className="option-check">
+                <input name="optimize" type="checkbox" defaultChecked={p.optimize} /> 启用 G1
+                垃圾回收优化
+              </label>
+              <p>使用 Java 内置的 G1GC；自定义 JVM 参数可覆盖或补充设置。</p>
+            </div>
+            <div className="field">
+              <label htmlFor="jvmArgs">
+                自定义 JVM 参数 <span>JVM ARGUMENTS</span>
+              </label>
+              <input
+                id="jvmArgs"
+                name="jvmArgs"
+                defaultValue={p.jvmArgs}
+                placeholder="例如 -XX:MaxGCPauseMillis=100"
+              />
+              <p>用空格分隔，带空格的值可用引号包裹。</p>
+            </div>
+            <div className="field">
+              <label htmlFor="gameArgs">
+                自定义游戏参数 <span>GAME ARGUMENTS</span>
+              </label>
+              <input
+                id="gameArgs"
+                name="gameArgs"
+                defaultValue={p.gameArgs}
+                placeholder="例如 --width 1280 --height 720"
+              />
+            </div>
+          </section>
+          <section className="settings-section">
+            <SettingHeading
+              icon="globe-2"
+              index="03 / NETWORK"
+              title="网络代理"
+              description="下载游戏、Java 和模组时使用的连接方式。"
             />
-          </div>
-        </section>
-        <section className="settings-section">
-          <SettingHeading
-            icon="globe-2"
-            index="03 / NETWORK"
-            title="网络代理"
-            description="下载游戏、Java 和模组时使用的连接方式。"
-          />
-          <div className="field">
-            <label htmlFor="proxyUrl">
-              手动代理地址 <span>留空时使用系统代理</span>
-            </label>
-            <input
-              id="proxyUrl"
-              name="proxyUrl"
-              defaultValue={p.proxyUrl}
-              placeholder="例如 http://127.0.0.1:7890"
-            />
-            <p>支持 HTTP、HTTPS 和 SOCKS5；使用系统代理时请留空。代理地址不支持填写账号或密码。</p>
-          </div>
-        </section>
+            <div className="field">
+              <label htmlFor="proxyUrl">
+                手动代理地址 <span>留空时使用系统代理</span>
+              </label>
+              <input
+                id="proxyUrl"
+                name="proxyUrl"
+                defaultValue={p.proxyUrl}
+                placeholder="例如 http://127.0.0.1:7890"
+              />
+              <p>
+                支持 HTTP、HTTPS 和 SOCKS5；使用系统代理时请留空。代理地址不支持填写账号或密码。
+              </p>
+            </div>
+          </section>
+        </details>
         <div className="settings-actions">
           <p>设置保存在本设备上。</p>
           <button className="save-button" type="submit">
@@ -433,6 +436,15 @@ export function SettingsPage(p: SettingsProps) {
           </button>
         </div>
       </form>
+      <details className="settings-appearance">
+        <summary>
+          界面外观 <small>横幅与背景</small>
+        </summary>
+        <AppearanceSettings theme={p.theme} />
+      </details>
+      <div id="update-panel">
+        <UpdatePanel {...p} />
+      </div>
     </>
   );
 }

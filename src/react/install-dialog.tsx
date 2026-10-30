@@ -10,6 +10,7 @@ interface InstallDraft {
   version: string;
   loader: string;
   addons: string[];
+  compatibility: Record<string, 'checking' | 'available' | 'unavailable' | 'unknown'>;
 }
 const choices = [
   ['vanilla', '原版', '不安装加载器'],
@@ -54,10 +55,22 @@ export function InstallDialog({ draft, addons }: { draft: InstallDraft; addons: 
                 name="draftLoader"
                 value={id}
                 defaultChecked={draft.loader === id}
+                disabled={id !== 'vanilla' && draft.compatibility[id] === 'unavailable'}
               />
               <span className="choice-dot" />
               <strong>{name}</strong>
               <small>{desc}</small>
+              {id !== 'vanilla' && (
+                <small className="compatibility-pending">
+                  {draft.compatibility[id] === 'checking'
+                    ? '正在检测兼容性…'
+                    : draft.compatibility[id] === 'available'
+                      ? '有可用版本'
+                      : draft.compatibility[id] === 'unavailable'
+                        ? '该游戏版本无可用版本'
+                        : '暂无法确认，安装时重试'}
+                </small>
+              )}
             </label>
           ))}
         </div>
@@ -95,11 +108,30 @@ export function InstallDialog({ draft, addons }: { draft: InstallDraft; addons: 
             ? '选择加载器后即可添加模组。'
             : '若所选模组没有兼容的版本，任务会显示具体原因。'}
         </p>
+        <div className="install-summary" aria-label="安装摘要">
+          <strong>安装摘要</strong>
+          <span>
+            {draft.version} ·{' '}
+            {choices.find((choice) => choice[0] === draft.loader)?.[1] || draft.loader}
+          </span>
+          <small>
+            {draft.addons.length
+              ? `附加模组：${draft.addons.map((id) => addons.find((item) => item.id === id)?.title || id).join('、')}；必需依赖将在安装时解析。`
+              : '不添加附加模组'}
+          </small>
+        </div>
         <div className="install-actions">
           <button className="outline-btn" data-action="close-install">
             取消
           </button>
-          <button className="save-button" data-action="confirm-install">
+          <button
+            className="save-button"
+            data-action="confirm-install"
+            disabled={
+              draft.loader !== 'vanilla' &&
+              ['checking', 'unavailable'].includes(draft.compatibility[draft.loader])
+            }
+          >
             加入下载任务 <Icon name="chevron-right" size={16} />
           </button>
         </div>

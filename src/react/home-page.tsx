@@ -7,8 +7,16 @@ type HomePageProps = {
   version: GameVersion | undefined;
   visual: VersionVisual;
   description: string;
+  versions: GameVersion[];
+  accountStatus: string;
 };
-export function HomePage({ version: v, visual, description }: HomePageProps) {
+export function HomePage({
+  version: v,
+  visual,
+  description,
+  versions,
+  accountStatus,
+}: HomePageProps) {
   return (
     <>
       <section className="hero home-hero">
@@ -59,9 +67,32 @@ export function HomePage({ version: v, visual, description }: HomePageProps) {
             )}
           </div>
         </div>
-        <button className="change-version" data-page="versions">
-          切换版本 <Icon name="chevron-down" size={15} />
-        </button>
+        <details className="home-version-menu" data-home-version-menu>
+          <summary className="change-version" aria-label="切换游戏版本">
+            切换版本 <Icon name="chevron-down" size={15} />
+          </summary>
+          <div className="home-version-options">
+            {versions
+              .filter((item) => item.installed)
+              .map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-select={item.id}
+                  className={item.id === v?.id ? 'selected' : ''}
+                >
+                  <strong>{item.name || item.id}</strong>
+                  <small>
+                    {item.kind}
+                    {item.id === v?.id ? ' · 当前' : ''}
+                  </small>
+                </button>
+              ))}
+            <button type="button" data-page="versions" className="quick-manage">
+              管理版本 →
+            </button>
+          </div>
+        </details>
         <button className="play-button" data-action="launch" disabled={!v?.installed}>
           <Icon name="play" /> 启动游戏
         </button>

@@ -7,6 +7,7 @@ export interface ContentVersion {
   name: string;
   number: string;
   date: string;
+  requiredDependencies?: string[] | null;
 }
 export interface ContentHit {
   id: string;

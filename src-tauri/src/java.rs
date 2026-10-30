@@ -12,6 +12,16 @@ use tauri::Emitter;
 
 use crate::{http_client, ResultT};
 
+#[tauri::command]
+pub fn required_java_version(game_dir: String, version: String) -> ResultT<Option<u64>> {
+    crate::version_id(&version)?;
+    let root = crate::root(&game_dir)?;
+    let metadata = crate::loaders::version_json(&root, &version)?;
+    Ok(metadata["javaVersion"]["majorVersion"]
+        .as_u64()
+        .filter(|major| *major > 0))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct JavaRuntime {
@@ -388,4 +398,31 @@ pub async fn remove_java(major: u32) -> ResultT<()> {
         return Err("未找到由 CCL 管理的 Java 环境".into());
     }
     fs::remove_dir_all(dir).map_err(|e| format!("删除失败: {e}"))
+}
+
+#[cfg(test)]
+mod requirement_tests {
+    use super::*;
+
+    #[test]
+    fn reads_installed_metadata_and_does_not_invent_a_requirement() {
+        let root =
+            std::env::temp_dir().join(format!("ccl-java-requirement-{}", std::process::id()));
+        let directory = root.join("versions").join("example");
+        fs::create_dir_all(&directory).unwrap();
+        let metadata = directory.join("example.json");
+        fs::write(&metadata, r#"{"javaVersion":{"majorVersion":21}}"#).unwrap();
+        let game_dir = root.to_string_lossy().to_string();
+        assert_eq!(
+            required_java_version(game_dir.clone(), "example".into()).unwrap(),
+            Some(21)
+        );
+        fs::write(&metadata, r#"{}"#).unwrap();
+        assert_eq!(
+            required_java_version(game_dir.clone(), "example".into()).unwrap(),
+            None
+        );
+        assert!(required_java_version(game_dir, "../other".into()).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 }

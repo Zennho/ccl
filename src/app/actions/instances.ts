@@ -219,8 +219,31 @@ export function createInstanceHandler(options: Options): ClickHandler {
         version: install.dataset.install || '',
         loader: 'vanilla',
         addons: [],
+        compatibility: Object.fromEntries(
+          ['fabric', 'quilt', 'forge', 'neoforge'].map((name) => [name, 'checking' as const]),
+        ),
       };
+      const draft = state.installDraft;
       renderOverlay();
+      for (const loader of ['fabric', 'quilt', 'forge', 'neoforge']) {
+        void invoke<boolean>('loader_compatibility', { gameVersion: draft.version, loader })
+          .then((available) => {
+            if (state.installDraft !== draft) return;
+            draft.compatibility[loader] =
+              typeof available === 'boolean'
+                ? available
+                  ? 'available'
+                  : 'unavailable'
+                : 'unknown';
+            renderOverlay();
+          })
+          .catch(() => {
+            if (state.installDraft === draft) {
+              draft.compatibility[loader] = 'unknown';
+              renderOverlay();
+            }
+          });
+      }
       return true;
     }
     const action = target.closest<HTMLElement>('[data-action]')?.dataset.action;

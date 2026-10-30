@@ -112,7 +112,7 @@ export function LocalMods({ s }: { s: ContentState }) {
             选择筛选结果
           </label>
           <span>已选择 {selected} 个</span>
-          <div>
+          <div hidden={!selected}>
             <button
               className="row-button"
               data-action="bulk-mod-enable"

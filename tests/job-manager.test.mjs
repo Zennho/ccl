@@ -110,3 +110,22 @@ test('rejects invalid installation responses instead of marking the task success
  const game=manager.runnerFor({type:'game',gameDir:'/game',javaPath:'java',draft:{version:'1.20.1',loader:'fabric',addons:[]}});
  await assert.rejects(game({id:'game-job'}),/游戏加载器安装结果无效/);
 });
+
+test('background task completion and failure show a concise notification', async () => {
+ const notices=[];
+ const storage={getItem:()=>null,setItem:()=>{}};
+ const state={jobs:[],jobLimit:1,page:'home',javaPath:'java',contentKey:'',gameDir:'/game',javaRuntimes:[]};
+ const manager=createJobManager({state,storage,invoke:async()=>{},persist(){},renderChrome(){},render(){},flash:(message,kind)=>notices.push([message,kind]),refreshInstalled:async()=>{},onJobFinished:async()=>{}});
+ manager.enqueueJob({key:'ok',kind:'mod',title:'成功项目',run:async()=>{}});
+ manager.enqueueJob({key:'failed',kind:'mod',title:'失败项目',run:async()=>{throw Error('network')}});
+ await tick();await tick();await tick();
+ assert(notices.some(([message])=>message.includes('成功项目')&&message.includes('安装完成')));
+ assert(notices.some(([message,kind])=>message.includes('失败项目')&&message.includes('安装失败')&&kind==='error'));
+});
+
+test('finished tasks do not produce a toast while the task list is visible', async () => {
+ const notices=[]; const state={jobs:[],jobLimit:1,page:'downloads',javaPath:'java',contentKey:'',gameDir:'/game',javaRuntimes:[]};
+ const manager=createJobManager({state,storage:{getItem:()=>null,setItem:()=>{}},invoke:async()=>{},persist(){},renderChrome(){},render(){},flash:(message)=>notices.push(message),refreshInstalled:async()=>{},onJobFinished:async()=>{}});
+ manager.enqueueJob({key:'ok',kind:'mod',title:'项目',run:async()=>{}});notices.length=0;
+ await tick();await tick();assert.equal(state.jobs[0].status,'done');assert.deepEqual(notices,[]);
+});

@@ -115,6 +115,9 @@ export function ContentDialog({
   shaderEnv: { detected?: string[] } | null;
   shaderEnvLoading: boolean;
 }) {
+  const [chosenVersion, setChosenVersion] = React.useState('');
+  const selectedVersion =
+    d.versions.find((version) => version.id === chosenVersion) || d.versions[0];
   const pack = d.kind === 'modpack',
     label: Record<string, string> = { mod: '模组', resourcepack: '材质包', shader: '光影包' },
     name = label[d.kind] || '内容';
@@ -178,7 +181,13 @@ export function ContentDialog({
               <div className="mod-version-list">
                 {d.versions.map((v, i) => (
                   <label className="mod-version-option" key={v.id}>
-                    <input type="radio" name="modVersion" value={v.id} defaultChecked={i === 0} />
+                    <input
+                      type="radio"
+                      name="modVersion"
+                      value={v.id}
+                      defaultChecked={i === 0}
+                      onChange={() => setChosenVersion(v.id)}
+                    />
                     <span>
                       <strong>{v.name}</strong>
                       <small>
@@ -193,6 +202,24 @@ export function ContentDialog({
             )}
           </>
         )}
+        <div className="install-summary" aria-label="安装摘要">
+          <strong>安装摘要</strong>
+          <span>{pack ? '创建独立实例' : `目标实例：${d.target}`}</span>
+          {!pack && (
+            <small>
+              {selectedVersion ? `选择版本：${selectedVersion.name}` : '尚未选择可安装版本'}
+              {d.kind === 'mod' &&
+                (selectedVersion?.requiredDependencies
+                  ? selectedVersion.requiredDependencies.length
+                    ? ` · 声明的直接必需依赖 ID：${selectedVersion.requiredDependencies.join('、')}`
+                    : ' · 没有声明直接必需依赖'
+                  : ' · 必需依赖信息将在安装时解析')}
+            </small>
+          )}
+          {d.kind === 'mod' && selectedVersion?.requiredDependencies && (
+            <small>安装时会检查已安装依赖并继续解析间接依赖。</small>
+          )}
+        </div>
         <div className="install-actions">
           <button className="outline-btn" data-action="close-mod-dialog">
             取消

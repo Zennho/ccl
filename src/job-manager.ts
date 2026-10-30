@@ -209,6 +209,7 @@ export function createJobManager({
           job.message =
             job.kind === 'export' ? '导出完成' : job.kind === 'import' ? '导入完成' : '安装完成';
           job.current = job.total;
+          if (state.page !== 'downloads') flash(`${job.title}：${job.message}`);
         })
         .catch((e) => {
           if (job.cancelRequested) {
@@ -220,6 +221,8 @@ export function createJobManager({
             job.message =
               job.kind === 'export' ? '导出失败' : job.kind === 'import' ? '导入失败' : '安装失败';
             job.error = String(e);
+            if (state.page !== 'downloads')
+              flash(`${job.title}：${job.message}，请查看下载任务。`, 'error');
           }
         })
         .finally(async () => {

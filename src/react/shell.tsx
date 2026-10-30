@@ -6,7 +6,6 @@ interface ShellProps {
   name: string;
   status: string;
   skin: string;
-  online: boolean;
   version: string;
   installedCount: number;
   jobCount: number;
@@ -23,8 +22,7 @@ const navigation = [
   ['multiplayer', 'globe-2', '多人联机'],
   ['downloads', 'download', '下载任务'],
   ['java', 'monitor', 'Java 管理'],
-  ['account', 'user-round', '账户与外观'],
-  ['settings', 'settings-2', '启动设置'],
+  ['settings', 'settings', '启动设置'],
 ] as const;
 function Avatar({ name, skin }: { name: string; skin: string }) {
   const [loaded, setLoaded] = useState('');
@@ -100,7 +98,6 @@ export function Shell(p: ShellProps) {
         </nav>
         <div className="side-bottom">
           <div className="side-footer">
-            <span className="status-dot"></span> {p.online ? '版本服务已连接' : '本地工作区'}{' '}
             <span>v{p.version}</span>
           </div>
         </div>
@@ -108,7 +105,11 @@ export function Shell(p: ShellProps) {
       <main className="main">
         <header className="topbar">
           <div className="breadcrumbs">
-            <strong>{navigation.find(([page]) => page === p.page)?.[2]}</strong>
+            <strong>
+              {p.page === 'account'
+                ? '账户与外观'
+                : navigation.find(([page]) => page === p.page)?.[2]}
+            </strong>
           </div>
           <div className="top-right">
             <div id="update-slot" aria-live="polite">
@@ -124,11 +125,22 @@ export function Shell(p: ShellProps) {
                 </div>
               )}
             </div>
-            <Avatar name={p.name} skin={p.skin} />
-            <div className="profile">
-              <strong>{p.name}</strong>
-              <small>{p.status}</small>
-            </div>
+            <button
+              type="button"
+              className={`account-entry${p.page === 'account' ? ' active' : ''}`}
+              data-page="account"
+              aria-label={`账户与外观：${p.name}，${p.status}`}
+              aria-current={p.page === 'account' ? 'page' : undefined}
+            >
+              <Avatar name={p.name} skin={p.skin} />
+              <span className="account-entry-label" aria-hidden="true">
+                账户与外观
+              </span>
+              <span className="profile sr-only">
+                <strong>{p.name}</strong>
+                <small>{p.status}</small>
+              </span>
+            </button>
           </div>
         </header>
         <div className="content"></div>

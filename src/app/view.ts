@@ -63,7 +63,6 @@ export function createApplicationView({
       name: account.playerName(),
       status: account.playerStatus(),
       skin: account.playerSkin(),
-      online: state.online,
       version: appVersion,
       installedCount: state.versions.filter((version) => version.installed).length,
       jobCount: jobs.activeJobCount(),
@@ -86,6 +85,8 @@ export function createApplicationView({
     hasJob: jobs.hasJob,
     usingOnline: account.usingOnline,
     playerName: account.playerName,
+    playerStatus: account.playerStatus,
+    isSkinSyncEnabled: account.skin.shouldApply,
     filteredServers: multiplayer.filteredServers,
     hydrateThumbnails,
   });

@@ -31,6 +31,7 @@ export interface ContentState {
   versions: GameVersion[];
   contentTarget: string;
   contentKind: string;
+  contentView: 'browse' | 'installed';
   contentSource: string;
   contentBusy: boolean;
   contentSort: string;

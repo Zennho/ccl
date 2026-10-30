@@ -18,7 +18,11 @@ export function createAccountHandler({
 }: Options): ClickHandler {
   return (target) => {
     const switchAccount = target.closest<HTMLElement>('[data-switch-account]');
-    if (switchAccount) return account.switchTo(switchAccount.dataset.switchAccount || '');
+    if (switchAccount) {
+      const menu = switchAccount.closest('details');
+      if (menu) menu.open = false;
+      return account.switchTo(switchAccount.dataset.switchAccount || '');
+    }
     const previewCape = target.closest<HTMLElement>('[data-preview-cape]');
     if (previewCape) {
       skin.previewCape(Number(previewCape.dataset.previewCape));
@@ -41,9 +45,17 @@ export function createAccountHandler({
         return account.openBrowser();
       case 'use-offline':
       case 'continue-offline':
+        {
+          const menu = target.closest('details');
+          if (menu) menu.open = false;
+        }
         account.useOffline();
         return true;
       case 'use-microsoft':
+        {
+          const menu = target.closest('details');
+          if (menu) menu.open = false;
+        }
         account.useMicrosoft();
         return true;
       case 'logout-microsoft':
@@ -54,6 +66,7 @@ export function createAccountHandler({
       case 'apply-offline-skin':
         return skin.applyToOffline();
       case 'find-offline-skin-mod':
+        state.contentView = 'browse';
         state.contentKind = 'mod';
         state.contentSource = 'modrinth';
         state.contentTarget = state.selected;
