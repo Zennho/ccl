@@ -34,6 +34,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/appearance-controller.ts',['createAppearanceController']);
  load(window,'lib/content-detail.ts',['createContentDetail']);
  load(window,'lib/game-launcher.ts',['createGameLauncher']);
+ load(window,'lib/account-actions.ts',['createAccountActions']);
  load(window,'react/renderer.tsx',['createRenderer']);
  load(window,'react/pages.tsx',['Icon','HomePage','VersionsPage','JavaPage']);
  load(window,'react/instance-settings.tsx',['InstanceSettingsDialog']);
