@@ -51,6 +51,7 @@ struct Version {
     kind: String,
     released: String,
     installed: bool,
+    official: bool,
     isolated: bool,
     has_instance_data: bool,
 }
@@ -589,6 +590,7 @@ async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     .join(id)
                     .join(format!("{id}.json"))
                     .exists(),
+                official: true,
                 isolated: false,
                 has_instance_data: false,
             })
@@ -652,6 +654,7 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
                     kind: kind.into(),
                     released: String::new(),
                     installed: true,
+                    official: false,
                     isolated,
                     has_instance_data,
                 });

@@ -83,6 +83,7 @@ export function createPageController({
         query: state.versionQuery,
         selected: state.selected,
         loading: state.loading,
+        online: state.online,
         versionVisual,
         deleteVersion: state.versionDelete,
         deleting: state.versionDeleting,

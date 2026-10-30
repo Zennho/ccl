@@ -46,7 +46,7 @@ export function createVersionManager({
           ...extra,
           ...state.versions
             .map((v) =>
-              ['正式版', '快照版', '旧版 Beta', '旧版 Alpha', '其他版本'].includes(v.kind)
+              v.official
                 ? {
                     ...v,
                     installed: byId.has(v.id),

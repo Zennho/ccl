@@ -9,8 +9,9 @@ function boot(history=[], hooks={}) {
   w.localStorage.setItem('ccl-job-history',JSON.stringify(history));
   w.setInterval=()=>0; w.isTauri=()=>true; w.getCurrentWindow=()=>({}); w.listen=async()=>()=>{}; w.openDialog=async()=>'/skin.png'; w.saveDialog=async()=>null;
   w.invoke=async(name,args={})=>{calls.push({name,args});
-    if(name==='list_versions')return [{id:'1.20.1',kind:'正式版',installed:false},{id:'one',name:'Instance One',kind:'Fabric',installed:true},{id:'two',name:'Instance Two',kind:'Forge',installed:true}];
-    if(name==='installed_versions')return [{id:'one',name:'Instance One',kind:'Fabric',installed:true},{id:'two',name:'Instance Two',kind:'Forge',installed:true}];
+    if(name==='list_versions' && hooks.offline)throw Error('offline');
+    if(name==='list_versions')return hooks.versions || [{id:'1.20.1',kind:'正式版',official:true,installed:false},{id:'one',name:'Instance One',kind:'Fabric',installed:true},{id:'two',name:'Instance Two',kind:'Forge',installed:true}];
+    if(name==='installed_versions')return hooks.installed || [{id:'one',name:'Instance One',kind:'Fabric',installed:true},{id:'two',name:'Instance Two',kind:'Forge',installed:true}];
     if(name==='list_microsoft_accounts')return [{uuid:'saved-one',name:'SavedPlayer'}];
     if(name==='switch_microsoft_account')return {account:{uuid:args.uuid,name:'SavedPlayer'}};
     if(name==='get_appearance')return {skin:null,model:'classic',capes:[]};
@@ -18,6 +19,8 @@ function boot(history=[], hooks={}) {
     if(name==='search_content')return {hits:[{id:'p',title:'Project',description:'Intro',author:'Author',downloads:1,installed:false}],hasMore:false};
     if(name==='content_categories')return [];
     if(name==='install_java')return new Promise(()=>{});
+    if(name==='install_version' && hooks.installVersion)return hooks.installVersion(args);
+    if(name==='install_loader' && hooks.installLoader)return hooks.installLoader(args);
     if(name==='loader_compatibility'){if(hooks.loader)return hooks.loader(args);if(args.loader==='forge')return false;if(args.loader==='quilt')throw Error('offline');return true;}
     if(name==='required_java_version')return 21;
     if(name==='preview_texture')return 'data:image/png;base64,skin';
@@ -86,4 +89,34 @@ test('Java guidance does not guess when metadata lacks a requirement',async()=>{
 
 test('avatar opens account and appearance directly while the sidebar stays concise',async()=>{
  const a=boot();try{await tick();const doc=a.w.document;assert.ok(!doc.querySelector('.sidebar [data-page="account"]'));assert.doesNotMatch(doc.querySelector('.sidebar').textContent,/版本服务已连接|本地工作区/);assert.match(doc.querySelector('.side-footer').textContent,/v\d/);assert.ok(doc.querySelector('.account-entry .account-entry-label'));assert.ok(doc.querySelector('.nav [data-page="settings"] .lucide-settings'));a.click('.account-entry');await tick();assert.equal(doc.querySelector('.breadcrumbs strong').textContent,'账户与外观');assert.ok(doc.querySelector('.identity-layout'));}finally{a.close();}
+});
+
+
+test('installed vanilla remains available in the catalog to install a loader',async()=>{
+ const vanilla={id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
+ const installed=[vanilla];
+ const a=boot([],{versions:[{...vanilla,official:true}],installed,installVersion:async()=>{},installLoader:async()=>{installed.push({id:'fabric-1.20.1',name:'Fabric 1.20.1',kind:'Fabric',installed:true});return 'fabric-1.20.1';}});
+ try{await tick();a.click('[data-page="versions"]');const doc=a.w.document;
+  assert.ok(doc.querySelector('[data-version-section="installed"] [data-select="1.20.1"]'));
+  assert.ok(!doc.querySelector('[data-version-section="installed"] [data-install="1.20.1"]'));
+  assert.match(doc.querySelector('[data-version-section="catalog"]').textContent,/原版已安装/);
+  a.click('[data-version-section="catalog"] [data-install="1.20.1"]');await tick();
+  const fabric=doc.querySelector('[name=draftLoader][value=fabric]');fabric.click();a.click('[data-action=confirm-install]');await tick();await tick();
+  assert.ok(a.calls.some(c=>c.name==='install_version'&&c.args.version==='1.20.1'));
+  assert.ok(a.calls.some(c=>c.name==='install_loader'&&c.args.gameVersion==='1.20.1'&&c.args.loader==='fabric'));
+  assert.match(doc.querySelector('.download-progress-dialog').textContent,/安装完成/);
+  a.click('[data-action=close-download-progress]');
+  assert.ok(doc.querySelector('[data-version-section="installed"] [data-select="fabric-1.20.1"]'));
+  assert.ok(doc.querySelector('[data-version-section="catalog"] [data-install="1.20.1"]'));
+ }finally{a.close();}
+});
+
+
+test('offline version list keeps installed instances and explains the missing catalog',async()=>{
+ const a=boot([],{offline:true,installed:[{id:'local-custom',name:'Local',kind:'正式版',official:false,installed:true}]});
+ try{await tick();a.click('[data-page="versions"]');const doc=a.w.document;
+  assert.ok(doc.querySelector('[data-version-section="installed"] [data-select="local-custom"]'));
+  assert.match(doc.querySelector('[data-version-section="catalog"]').textContent,/无法获取官方版本列表/);
+  assert.equal(doc.querySelector('[data-version-section="catalog"] [data-install]'),null);
+ }finally{a.close();}
 });

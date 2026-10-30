@@ -4,6 +4,7 @@ export interface GameVersion {
   kind: string;
   released?: string;
   installed: boolean;
+  official?: boolean;
   isolated?: boolean;
   hasInstanceData?: boolean;
 }
