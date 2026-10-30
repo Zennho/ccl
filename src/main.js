@@ -22,7 +22,7 @@ import { createMultiplayer, copyText } from './lib/multiplayer.ts';
 import { createVersionManager } from './lib/version-manager.ts';
 import { createAvatarStore } from './lib/avatar-store.ts';
 import { createAccountAppearance } from './lib/account-appearance.ts';
-import { createInstanceTheme, instanceColors, instanceKey } from './lib/instance-theme.ts';
+import { createInstanceTheme, instanceColors } from './lib/instance-theme.ts';
 import { readSettings, createInitialState, createTheme, persistSettings } from './lib/launcher-state.ts';
 import { createAppearanceController } from './lib/appearance-controller.ts';
 import { createContentDetail } from './lib/content-detail.ts';
