@@ -6,6 +6,13 @@ const { JSDOM } = require('jsdom');
 const { IDBFactory } = require('fake-indexeddb');
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 10));
+async function waitFor(predicate, message) {
+ const deadline=Date.now()+5000;while(Date.now()<deadline){if(await predicate())return;await tick();}assert.fail(message);
+}
+function cachedAvatar(database,uuid) {
+ return new Promise((resolve,reject)=>{const open=database.open('ccl-appearance',1);open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result;if(!db.objectStoreNames.contains('images')){db.close();resolve(undefined);return;}const tx=db.transaction('images','readonly'),request=tx.objectStore('images').get(`online-avatar:${uuid}`);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);tx.oncomplete=()=>db.close();};});
+}
+
 const installed = {id:'1.20.1',name:'1.20.1',kind:'正式版',installed:true};
 function boot({preference='microsoft', known=false, restore, logout, launch, appearance, database, selectedSkin, versions=[installed], instanceSettings, savedAccounts, switchAccount, savedSettings, rememberAccount, listJava} = {}) {
   const dom = new JSDOM('<div id="app"></div>', {url:'http://localhost/',runScripts:'dangerously',pretendToBeVisual:true});
@@ -370,13 +377,14 @@ test('logout removes the selected cached avatar', async () => {
 
 test('failed skin refresh keeps the cached avatar until a successful empty response', async () => {
  const database=new IDBFactory();const first=boot({known:true,database,restore:()=>({uuid:'one',name:'First'}),appearance:()=>({skin:'data:image/png;base64,one',model:'classic',capes:[]})});
- try {await tick();await tick();}finally{first.close();}
+ try {await waitFor(()=>cachedAvatar(database,'one').then(value=>value==='data:image/png;base64,one'),'头像应写入缓存');}finally{first.close();}
  let attempt=0;
  const app=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>({uuid:'one',name:'First'}),appearance:()=>++attempt===1?Promise.reject('网络错误'):{skin:null,model:'classic',capes:[]}});
  try {
-  await tick();await tick();assert.equal(app.w.document.querySelector('.avatar-face').src,'data:image/png;base64,one');
-  app.click('[data-page="account"]');await tick();await tick();
-  assert.equal(app.w.document.querySelector('.avatar-face'),null,'a successful no-skin response invalidates the old cache');
+  await waitFor(()=>app.w.document.querySelector('.avatar-face')?.src==='data:image/png;base64,one','已缓存头像应显示');
+  app.click('[data-page="account"]');
+  await waitFor(()=>attempt>=2&&!app.w.document.querySelector('.avatar-face'),'成功获取空皮肤应清除旧头像');
+  await waitFor(()=>cachedAvatar(database,'one').then(value=>value===undefined),'旧头像应从缓存移除');
  }finally{app.close();}
  const again=boot({known:true,database,savedSettings:{accountUuid:'one',accountName:'First'},restore:()=>new Promise(()=>{})});
  try {await tick();await tick();assert.equal(again.w.document.querySelector('.avatar-face'),null);}finally{again.close();}
