@@ -17,6 +17,8 @@ import { createInstanceManage } from './lib/instance-manage.ts';
 import { createPackManager } from './lib/pack-manager.ts';
 import { createGameEvents } from './lib/game-events.ts';
 import { createSystemStatus } from './lib/system-status.ts';
+import { syncMemoryControls as syncMemoryFields } from './lib/memory-controls.ts';
+import { createMultiplayer, copyText } from './lib/multiplayer.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -119,27 +121,7 @@ async function restoreThemeImages() {
 const systemStatus=createSystemStatus({state,isDesktop:isTauri,getMemory:()=>invoke('memory_info'),getUpdate:()=>invoke('check_launcher_update'),
  renderMemory:()=>{if(state.page==='settings'&&app.querySelector('#memory-info'))renderSettingsPage();},renderChrome});
 const refreshMemoryInfo=systemStatus.refreshMemoryInfo,checkLauncherUpdate=systemStatus.checkLauncherUpdate;
-function syncMemoryControls() {
- const mode=app.querySelector('#memory-mode'), manual=app.querySelector('#memory-manual');
- if(mode && manual) manual.hidden=mode.value!=='manual';
- const value=app.querySelector('#memory'), slider=app.querySelector('#memory-range');
- if(mode && value) value.disabled=mode.value!=='manual';
- if(mode && slider) slider.disabled=mode.value!=='manual';
- if(value && slider && value.value) slider.value=value.value;
- const instanceMode=app.querySelector('#instance-memory-mode');
- const instanceValue=app.querySelector('#instance-memory'),instanceSlider=app.querySelector('#instance-memory-range');
- const instanceForm=app.querySelector('#instance-settings-form');
- if(instanceForm) {
-  instanceForm.querySelector('#instance-java-fields').disabled=!instanceForm.elements.overrideJava.checked;
-  instanceForm.querySelector('#instance-memory-fields').disabled=!instanceForm.elements.overrideMemory.checked;
-  instanceForm.querySelector('#instance-args-fields').disabled=!instanceForm.elements.overrideArgs.checked;
-  const manual=instanceForm.querySelector('#instance-memory-manual');
-  manual.hidden=instanceMode.value!=='manual';
-  if(instanceValue)instanceValue.disabled=instanceMode.value!=='manual';
- }
- if(instanceMode && instanceSlider)instanceSlider.disabled=instanceMode.value!=='manual';
- if(instanceValue && instanceSlider && instanceValue.value)instanceSlider.value=instanceValue.value;
-}
+function syncMemoryControls(){syncMemoryFields(app);}
 
 function versionVisual(version) {
  const instance=version?.id?getInstanceTheme(state.gameDir,version.id):null;
@@ -192,26 +174,8 @@ function shellProps() {
  return {page:state.page,name:playerName(),status:playerStatus(),skin:typeof skin==='string'&&skin.startsWith('data:image/png;base64,')?skin:'',online:state.online,version:appVersion,installedCount:state.versions.filter(v=>v.installed).length,jobCount:activeJobCount(),updateInfo:state.updateInfo,updateDismissed:state.updateDismissed,notice:state.notice,noticeKind:state.noticeKind,noticeCrash:!!(state.crash&&state.noticeCrash)};
 }
 function renderShell() { if(app.querySelector('.app-shell')) renderer.chrome(Shell,shellProps()); }
-async function refreshLanAddresses() {
- try { state.lanAddresses=await invoke('ipv6_addresses'); if(state.page==='multiplayer') render(); }
- catch(e) { flash(`读取 IPv6 地址失败：${e}`,'error'); }
-}
-async function copyText(value) {
- if(navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
- const input=document.createElement('textarea'); input.value=value; input.style.position='fixed'; input.style.opacity='0'; document.body.appendChild(input); input.select(); const ok=document.execCommand('copy'); input.remove(); if(!ok) throw new Error('复制失败');
-}
-function filteredServers() {
- const query=state.serverQuery.trim().toLowerCase();
- const list=Array.isArray(state.serverCatalog?.servers)?state.serverCatalog.servers:[];
- return list.filter(s=>s && typeof s.address==='string' && (!query || [s.name,s.address,s.version,s.description,...(Array.isArray(s.tags)?s.tags:[])].some(x=>String(x||'').toLowerCase().includes(query))) && (state.serverStatus==='all' || s.status===state.serverStatus));
-}
-async function refreshPublicServers() {
- if(state.serverLoading) return;
- state.serverLoading=true;state.serverError='';if(state.page==='multiplayer') render();
- try { const data=await invoke('public_servers'); if(!data || !Array.isArray(data.servers)) throw new Error('目录格式无效'); state.serverCatalog=data;state.serverPage=0; }
- catch(e) { state.serverError=String(e); }
- finally { state.serverLoading=false;if(state.page==='multiplayer') render(); }
-}
+const multiplayer=createMultiplayer({state,render,flash,getAddresses:()=>invoke('ipv6_addresses'),getServers:()=>invoke('public_servers')});
+const refreshLanAddresses=multiplayer.refreshAddresses,filteredServers=multiplayer.filteredServers,refreshPublicServers=multiplayer.refreshPublicServers;
 const ADDONS = [
  { id:'fabric-api', title:'Fabric API', desc:'许多 Fabric 模组的基础依赖', loaders:['fabric'] },
  { id:'sodium', title:'Sodium', desc:'改善渲染性能', loaders:['fabric','neoforge'] },
