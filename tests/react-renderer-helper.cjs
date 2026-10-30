@@ -64,6 +64,18 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/overlay-controller.tsx',['createOverlayController']);
  load(window,'react/page-controller.tsx',['createPageController']);
  load(window,'lib/render-cycle.ts',['createRenderCycle']);
+ load(window,'app/actions/navigation.ts',['createNavigationHandler']);
+ load(window,'app/actions/shell.ts',['createShellHandler','installWindowResize','closeVersionMenus']);
+ load(window,'app/actions/instances.ts',['createInstanceHandler']);
+ load(window,'app/actions/account.ts',['createAccountHandler']);
+ load(window,'app/actions/content.ts',['createContentHandler']);
+ load(window,'app/actions/downloads.ts',['createDownloadHandler']);
+ load(window,'app/actions/multiplayer.ts',['createMultiplayerHandler']);
+ load(window,'app/actions/archive.ts',['createArchiveHandler']);
+ load(window,'app/actions/launcher.ts',['createLauncherHandler']);
+ load(window,'app/form-events.ts',['installFormEvents']);
+ load(window,'app/startup.ts',['startApplication']);
+ load(window,'app/click-dispatcher.ts',['installClickDispatcher']);
 };
 
 // Load the actual TypeScript entry in strict mode for browser integration tests.
