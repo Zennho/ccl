@@ -101,3 +101,12 @@ test('resource pack downloads report byte speed with and without a known length'
   assert.match(job.metrics,/1.00 MB\/s/);assert.doesNotMatch(job.metrics,/预计/);
  } finally {Date.now=realNow;finish();await tick();}
 });
+
+test('rejects invalid installation responses instead of marking the task successful', async () => {
+ const {manager,state}=setup(async name=>name==='install_java'?{}:name==='install_loader'?null:undefined);
+ const java=manager.runnerFor({type:'java',major:21});
+ await assert.rejects(java({id:'java-job'}),/Java 安装结果无效/);
+ assert.equal(state.javaPath,'java');
+ const game=manager.runnerFor({type:'game',gameDir:'/game',javaPath:'java',draft:{version:'1.20.1',loader:'fabric',addons:[]}});
+ await assert.rejects(game({id:'game-job'}),/游戏加载器安装结果无效/);
+});

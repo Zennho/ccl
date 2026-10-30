@@ -1,10 +1,10 @@
 type JobStatus = 'queued' | 'running' | 'canceling' | 'cancelled' | 'done' | 'failed';
 interface InstallDraft { version:string; loader:string; addons:string[] }
-type Recipe = {type:'java';major:number} | {type:'game';draft:InstallDraft;gameDir:string;javaPath:string} | {type:'pack';kind:string;gameDir:string;version:string;source:string;projectId:string;packVersionId:string} | {type:'mod';gameDir:string;version:string;source:string;projectId:string;modVersionId:string} | {type:'modpack';gameDir:string;source:string;projectId:string;javaPath:string};
-interface JobSpec {key:string;kind:string;title:string;gameDir?:string;version?:string;recipe?:Recipe;run:((job:Job)=>Promise<unknown>)|null}
-interface Job extends JobSpec {id:string;status:JobStatus;message:string;current:number;total:number;error:string;metrics?:string;registered?:boolean;cancelRequested?:boolean;resultVersion?:string;lastSample?:{time:number;current:number;total:number}|null}
+export type Recipe = {type:'java';major:number} | {type:'game';draft:InstallDraft;gameDir:string;javaPath:string} | {type:'pack';kind:string;gameDir:string;version:string;source:string;projectId:string;packVersionId:string} | {type:'mod';gameDir:string;version:string;source:string;projectId:string;modVersionId:string} | {type:'modpack';gameDir:string;source:string;projectId:string;javaPath:string};
+export interface JobSpec {key:string;kind:string;title:string;gameDir?:string;version?:string;recipe?:Recipe;run:((job:Job)=>Promise<unknown>)|null}
+export interface Job extends JobSpec {id:string;status:JobStatus;message:string;current:number;total:number;error:string;metrics?:string;registered?:boolean;cancelRequested?:boolean;resultVersion?:string;lastSample?:{time:number;current:number;total:number}|null}
 interface JobState {jobs:Job[];page:string;jobLimit:number;javaPath:string;gameDir:string;contentKey:string;javaRuntimes:unknown[]}
-interface Dependencies {state:JobState;invoke:(command:string,args?:Record<string,unknown>)=>Promise<any>;persist:()=>void;renderChrome:()=>void;flash:(message:string,kind?:string)=>void;render:()=>void;refreshInstalled:(gameDir:string)=>Promise<unknown>;onJobFinished:(job:Job)=>Promise<unknown>;renderDownloads?:()=>void;storage?:Pick<Storage,'getItem'|'setItem'>}
+interface Dependencies {state:JobState;invoke:(command:string,args?:Record<string,unknown>)=>Promise<unknown>;persist:()=>void;renderChrome:()=>void;flash:(message:string,kind?:string)=>void;render:()=>void;refreshInstalled:(gameDir:string)=>Promise<unknown>;onJobFinished:(job:Job)=>Promise<unknown>;renderDownloads?:()=>void;storage?:Pick<Storage,'getItem'|'setItem'>}
 interface JobProgress {jobId:string;message:string;current:number;total:number}
 // Download queue and persisted retry recipes. UI and Tauri operations are injected
 // so the state machine can be exercised without a desktop runtime.
@@ -12,7 +12,7 @@ export function createJobManager({state, invoke, persist, renderChrome, flash, r
 function saveJobs() { try { storage.setItem('ccl-job-history',JSON.stringify(state.jobs.slice(-100).map(({id,key,kind,title,status,gameDir,version,recipe})=>({id,key,kind,title,status,gameDir,version,recipe})))); } catch {} }
 function runnerFor(recipe:Recipe | undefined): ((job:Job)=>Promise<unknown>) | null {
  if(!recipe || typeof recipe!=='object') return null;
- if(recipe.type==='java') return async job=>{const java=await invoke('install_java',{major:recipe.major,jobId:job.id});if(state.javaPath==='java'||!state.javaPath){state.javaPath=java.path;persist();}};
+ if(recipe.type==='java') return async job=>{const java=await invoke('install_java',{major:recipe.major,jobId:job.id});if(!java||typeof java!=='object'||!('path' in java)||typeof java.path!=='string')throw new Error('Java 安装结果无效');if(state.javaPath==='java'||!state.javaPath){state.javaPath=java.path;persist();}};
  if(recipe.type==='game') return job=>runGameJob(job,recipe.draft,recipe.gameDir,recipe.javaPath);
  if(recipe.type==='pack' && ['resourcepack','shader'].includes(recipe.kind)) return job=>{const apiKey=recipe.source==='curseforge'?state.contentKey:'';if(recipe.source==='curseforge'&&!apiKey.trim())throw new Error('请先在内容页面重新输入 CurseForge API Key');return invoke('install_pack',{gameDir:recipe.gameDir,version:recipe.version,source:recipe.source,kind:recipe.kind,projectId:recipe.projectId,packVersionId:recipe.packVersionId,apiKey,jobId:job.id});};
  if(recipe.type==='mod' || recipe.type==='modpack') return job=>{const apiKey=recipe.source==='curseforge'?state.contentKey:'';if(recipe.source==='curseforge'&&!apiKey.trim()) throw new Error('请先在模组页面重新输入 CurseForge API Key');const args={gameDir:recipe.gameDir,source:recipe.source,projectId:recipe.projectId,apiKey,jobId:job.id};return recipe.type==='mod'?invoke('install_mod',{...args,version:recipe.version,modVersionId:recipe.modVersionId}):invoke('install_modpack',{...args,javaPath:recipe.javaPath});};
@@ -37,7 +37,7 @@ function pumpJobs() {
    try {
     if(job.registered) {try {await invoke('end_job',{jobId:job.id});} catch(e) {flash(`任务清理失败：${e}`,'error');}}
     if (job.gameDir) await refreshInstalled(job.gameDir);
-    if (job.kind==='java') { try { state.javaRuntimes=await invoke('list_java'); if(state.page==='java') render(); } catch {} }
+    if (job.kind==='java') { try { const runtimes=await invoke('list_java');state.javaRuntimes=Array.isArray(runtimes)?runtimes:[]; if(state.page==='java') render(); } catch {} }
     await onJobFinished(job);
    } catch(e) { flash(`任务刷新失败：${e}`,'error'); }
    finally { saveJobs();renderJobList();pumpJobs(); }
@@ -65,6 +65,7 @@ async function runGameJob(job:Job,draft:InstallDraft,gameDir:string,javaPath:str
  await invoke('install_version',{version:selectedVersion,gameDir,jobId:job.id});
  if(job.cancelRequested) throw new Error('任务已取消');
  const result=draft.loader==='vanilla' ? selectedVersion : await invoke('install_loader',{gameVersion:selectedVersion,gameDir,loader:draft.loader,loaderVersion:null,javaPath,jobId:job.id});
+ if(typeof result!=='string')throw new Error('游戏加载器安装结果无效');
  job.resultVersion=result;
  for (let i=0;i<draft.addons.length;i++) { if(job.cancelRequested) throw new Error('任务已取消'); updateJob(job,{message:`正在安装附加模组 ${draft.addons[i]}（${i+1}/${draft.addons.length}）`,current:0,total:0}); try { await invoke('install_mod',{gameDir,version:result,source:'modrinth',projectId:draft.addons[i],apiKey:'',modVersionId:null,jobId:job.id}); } catch(e) { if(job.cancelRequested) throw e; if(String(e).includes('该模组已安装到目标实例')) continue; throw `游戏和加载器已安装；附加模组 ${draft.addons[i]} 安装失败：${e}`; } }
 }

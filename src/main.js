@@ -29,6 +29,11 @@ import { createContentDetail } from './lib/content-detail.ts';
 import { createGameLauncher } from './lib/game-launcher.ts';
 import { createAccountActions } from './lib/account-actions.ts';
 import { createInstanceLaunchSettings } from './lib/instance-launch-settings.ts';
+import { createArchiveManager } from './lib/archive-manager.ts';
+import { createVersionDelete } from './lib/version-delete.ts';
+import { createSkinController } from './lib/skin-controller.ts';
+import { createContentInstall } from './lib/content-install.ts';
+import { createGlobalSettings } from './lib/global-settings.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -58,8 +63,6 @@ const state=createInitialState(saved);
 const theme=createTheme(saved);
 const app = document.querySelector('#app');
 const renderer = createRenderer(app);
-let offlineSkinInstances={};
-try { const value=JSON.parse(localStorage.getItem('ccl-offline-skin-instances')||'{}');if(value && typeof value==='object' && !Array.isArray(value))offlineSkinInstances=value; } catch {}
 const instanceLaunch=createInstanceLaunchSettings({state,storage:localStorage,render:renderOverlay,flash});
 const getLaunchSettings=instanceLaunch.get,effectiveLaunchSettings=instanceLaunch.effective;
 
@@ -101,7 +104,7 @@ function shellProps() {
  return {page:state.page,name:playerName(),status:playerStatus(),skin:typeof skin==='string'&&skin.startsWith('data:image/png;base64,')?skin:'',online:state.online,version:appVersion,installedCount:state.versions.filter(v=>v.installed).length,jobCount:activeJobCount(),updateInfo:state.updateInfo,updateDismissed:state.updateDismissed,notice:state.notice,noticeKind:state.noticeKind,noticeCrash:!!(state.crash&&state.noticeCrash)};
 }
 function renderShell() { if(app.querySelector('.app-shell')) renderer.chrome(Shell,shellProps()); }
-const multiplayer=createMultiplayer({state,render,flash,getAddresses:()=>invoke('ipv6_addresses'),getServers:()=>invoke('public_servers')});
+const multiplayer=createMultiplayer({state,render,flash,getAddresses:()=>invoke('ipv6_addresses'),getServers:()=>invoke('public_servers'),startRoom:gamePort=>invoke('start_ipv6_room',{gamePort}),stopRoom:()=>invoke('stop_ipv6_room'),testConnection:address=>invoke('test_ipv6_connection',{address})});
 const refreshLanAddresses=multiplayer.refreshAddresses,filteredServers=multiplayer.filteredServers,refreshPublicServers=multiplayer.refreshPublicServers;
 const ADDONS = [
  { id:'fabric-api', title:'Fabric API', desc:'许多 Fabric 模组的基础依赖', loaders:['fabric'] },
@@ -111,7 +114,8 @@ const ADDONS = [
 ];
 function renderContentPage() { if(state.page==='content' && app.querySelector('.content')) { renderer.page(ContentPage,{state},'content'); hydrateThumbnails(); } }
 function renderLocalPacks() { renderContentPage(); }
-const packManager=createPackManager({state,render:renderLocalPacks,
+const packManager=createPackManager({state,render:renderLocalPacks,renderPage:render,flash,invalidateContent:()=>contentSearch.invalidate(),search:()=>searchContent(),
+ remove:draft=>invoke('remove_local_pack',draft),updates:(gameDir,version,kind,apiKey)=>invoke('check_pack_updates',{gameDir,version,kind,apiKey}),
  list:(gameDir,version,kind)=>invoke('list_local_packs',{gameDir,version,kind}),
  environment:(gameDir,version)=>invoke('shader_environment',{gameDir,version})});
 const refreshPacks=packManager.refresh;
@@ -124,7 +128,8 @@ function renderLocalMods() { renderContentPage(); }
 const modManager=createModManager({state,render:renderLocalMods,search:()=>searchContent(),flash,
  list:(gameDir,version)=>invoke('list_mods',{gameDir,version}),
  remove:(gameDir,version,name)=>invoke('remove_mod',{gameDir,version,name}),
- setEnabled:(gameDir,version,name,enabled)=>invoke('set_mod_enabled',{gameDir,version,name,enabled})});
+ setEnabled:(gameDir,version,name,enabled)=>invoke('set_mod_enabled',{gameDir,version,name,enabled}),
+ conflicts:(gameDir,version)=>invoke('check_mod_conflicts',{gameDir,version}),updates:(gameDir,version)=>invoke('check_mod_updates',{gameDir,version})});
 function applyModChanges(action,names){return modManager.applyModChanges(action,names);}
 function refreshMods(){return modManager.refreshMods();}
 const contentSearch=createContentSearch({state,modRevision:modManager.revision,render,renderContent:renderContentPage,
@@ -257,8 +262,8 @@ app.addEventListener('click', async event => {
  const worldBackup=event.target.closest('[data-world-backup]');if(worldBackup&&state.manageView){const item=state.manageView.items[Number(worldBackup.dataset.worldBackup)];if(item)await manageOperation('create_backup',{scope:'world',world:item.folder},'存档备份已创建。');return;}
  const overviewButton=event.target.closest('[data-instance-overview]');if(overviewButton){const version=overviewButton.dataset.instanceOverview,gameDir=state.gameDir,item=state.versions.find(v=>v.id===version&&v.installed);if(!item)return;const view={version,gameDir,name:item.name||version,loading:true,info:null,error:''};state.instanceView=view;renderOverlay();try{const info=await invoke('instance_overview',{gameDir,version});if(state.instanceView===view)view.info=info;}catch(e){if(state.instanceView===view)view.error=String(e);}finally{if(state.instanceView===view){view.loading=false;renderOverlay();}}return;}
  const openFolder = event.target.closest('[data-open-version-folder]'); if (openFolder) { try { await invoke('open_version_folder',{gameDir:state.instanceView?.version===openFolder.dataset.openVersionFolder?state.instanceView.gameDir:state.gameDir,version:openFolder.dataset.openVersionFolder}); } catch(e) { flash(String(e),'error'); } return; }
- const deleteVersion=event.target.closest('[data-delete-version]');if(deleteVersion) {const version=state.versions.find(v=>v.id===deleteVersion.dataset.deleteVersion&&v.installed);if(version){state.versionDelete={id:version.id,name:version.name||version.id,isolated:!!(version.isolated||version.hasInstanceData),gameDir:state.gameDir};render();}return;}
- const exportButton=event.target.closest('[data-export-game]'); if(exportButton) { state.archiveDraft={kind:'export',version:exportButton.dataset.exportGame,gameDir:state.gameDir}; renderOverlay(); return; }
+ const deleteVersion=event.target.closest('[data-delete-version]');if(deleteVersion){versionDelete.open(deleteVersion.dataset.deleteVersion);return;}
+ const exportButton=event.target.closest('[data-export-game]'); if(exportButton) {archiveManager.openExport(exportButton.dataset.exportGame);return;}
  const select = event.target.closest('[data-select]'); if (select) { state.selected = select.dataset.select; persist(); render();void loadInstanceCover(state.gameDir,state.selected); flash(`已选择 ${state.selected}`); return; }
  const install = event.target.closest('[data-install]'); if (install) { state.installDraft={version:install.dataset.install,loader:'vanilla',addons:[]}; renderOverlay(); return; }
  const contentPageButton=event.target.closest('[data-content-page]');if(contentPageButton && !state.contentBusy) {const page=Number(contentPageButton.dataset.contentPage);if(page>=0 && page<=332 && (page<=state.contentPage||state.contentHasMore)){state.contentPage=page;await searchContent();}return;}
@@ -269,9 +274,7 @@ app.addEventListener('click', async event => {
  if (contentInstall && !state.contentBusy) {
   const isDetails=contentInstall.hasAttribute('data-content-details');
   const item=state.contentResults[Number(isDetails?contentInstall.dataset.contentDetails:contentInstall.dataset.contentInstall)]; if(!item) return;
-  const kind=state.contentKind,source=state.contentSource,apiKey=state.contentKey,gameDir=state.gameDir,javaPath=state.javaPath;
-  if(kind==='modpack' && !isDetails) {enqueueJob({key:`modpack:${source}:${item.id}:${gameDir}`,kind,title:item.title,gameDir,recipe:{type:'modpack',gameDir,source,projectId:item.id,javaPath},run:job=>invoke('install_modpack',{gameDir,source,projectId:item.id,apiKey,javaPath,jobId:job.id})});return;}
-  await contentDetail.open(item);return;
+  await contentInstallManager.select(item,isDetails);return;
  }
  const packRemove=event.target.closest('[data-pack-remove]');if(packRemove && !state.packWorking){const item=state.localPacks[Number(packRemove.dataset.packRemove)];if(item){state.packDelete={name:item.name,kind:state.contentKind,version:state.contentTarget,gameDir:state.gameDir};render();}return;}
  const modToggle = event.target.closest('[data-mod-toggle]');
@@ -291,8 +294,8 @@ app.addEventListener('click', async event => {
  const cancelJob=event.target.closest('[data-cancel-job]');if(cancelJob){const job=state.jobs.find(j=>j.id===cancelJob.dataset.cancelJob);if(job){await requestJobCancel(job);pumpJobs();}return;}
  const action = event.target.closest('[data-action]')?.dataset.action;
  if(action==='cancel-all-jobs'){await Promise.all(state.jobs.filter(j=>j.status==='queued'||j.status==='running').map(requestJobCancel));pumpJobs();return;}
- if(action==='cancel-version-delete'){state.versionDelete=null;render();return;}
- if(action==='confirm-version-delete' && state.versionDelete && !state.versionDeleting){const d=state.versionDelete,removeInstance=!!app.querySelector('#delete-instance-data')?.checked;if(state.jobs.some(j=>j.gameDir===d.gameDir&&['queued','running','canceling'].includes(j.status))){flash('该游戏目录有进行中或等待中的任务，请先取消或等待结束。','error');return;}state.versionDeleting=true;render();try{await invoke('delete_version',{gameDir:d.gameDir,version:d.id,removeInstance});state.versionDelete=null;if(state.selected===d.id)state.selected='';if(state.contentTarget===d.id){state.contentTarget='';state.localMods=[];state.contentResults=[];}await refreshInstalled(d.gameDir);persist();flash('版本已删除。');}catch(e){flash(`删除失败：${e}`,'error');}finally{state.versionDeleting=false;render();}return;}
+ if(action==='cancel-version-delete'){versionDelete.cancel();return;}
+ if(action==='confirm-version-delete'){await versionDelete.confirm(!!app.querySelector('#delete-instance-data')?.checked);return;}
  const lanView=event.target.closest('[data-lan-view]'); if(lanView) { state.lanView=lanView.dataset.lanView;render();if(state.lanView==='servers'&&!state.serverCatalog&&!state.serverLoading) await refreshPublicServers();return; }
  const serverCopy=event.target.closest('[data-server-copy]');if(serverCopy) { const entry=filteredServers()[Number(serverCopy.dataset.serverCopy)];if(entry) { try { await copyText(entry.address);flash('服务器地址已复制，在游戏中选择“多人游戏 → 直接连接”粘贴。'); } catch(e) { flash(`复制失败：${e}`,'error'); } }return; }
  const serverPage=event.target.closest('[data-server-page]');if(serverPage) { state.serverPage=Math.max(0,Number(serverPage.dataset.serverPage));render();return; }
@@ -300,11 +303,11 @@ app.addEventListener('click', async event => {
  if(copyIpv6 && state.lanRoom) { const address=state.lanAddresses[Number(copyIpv6.dataset.copyIpv6)]; if(address) { try { await copyText(`[${address.address}]:${state.lanRoom.port}`); flash('房间地址已复制。'); } catch(e) { flash(`复制失败，请手动复制地址：${e}`,'error'); } } return; }
  if(action==='refresh-public-servers') { await refreshPublicServers(); return; }
  if(action==='refresh-ipv6') { await refreshLanAddresses(); return; }
- if(action==='stop-ipv6-room' && !state.lanBusy) { state.lanBusy=true;render();try { await invoke('stop_ipv6_room');state.lanRoom=null;flash('房间已关闭。'); } catch(e) { flash(`关闭房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; }
- if(action==='import-game') { try { const path=await openDialog({multiple:false,directory:false,filters:[{name:'CCL 或 PCL 兼容整合包',extensions:['zip','mrpack']}]}); if(path && typeof path==='string') { const manifest=await invoke('inspect_game_archive',{path}); state.archiveDraft={kind:'import',path,manifest,gameDir:state.gameDir,javaPath:state.javaPath}; renderOverlay(); } } catch(e) { flash(`无法读取导入包：${e}`,'error'); } return; }
- if(action==='close-archive' || (action==='close-archive-backdrop' && event.target.classList.contains('install-overlay'))) { state.archiveDraft=null; renderOverlay(); return; }
- if(action==='confirm-export' && state.archiveDraft?.kind==='export') { const d=state.archiveDraft,includeSaves=!!app.querySelector('#archive-saves')?.checked,exportFormat=app.querySelector('input[name=archiveFormat]:checked')?.value||'ccl'; try { const path=await saveDialog({defaultPath:`CCL-${d.version}.${exportFormat==='pcl'?'mrpack':'zip'}`,filters:[{name:exportFormat==='pcl'?'PCL 兼容整合包':'CCL 游戏导出包',extensions:[exportFormat==='pcl'?'mrpack':'zip']}]}); if(!path) return; const launchSettings={memory:Number(state.memory),memoryMode:state.memoryMode,optimize:state.optimize,jvmArgs:state.jvmArgs,gameArgs:state.gameArgs}; state.archiveDraft=null;renderOverlay(); enqueueJob({key:`export:${d.gameDir}:${d.version}:${path}`,kind:'export',title:`导出 · ${d.version}`,gameDir:d.gameDir,run:job=>invoke('export_game',{gameDir:d.gameDir,version:d.version,path,includeSaves,launchSettings,exportFormat,jobId:job.id})}); } catch(e) { flash(`导出失败：${e}`,'error'); } return; }
- if(action==='confirm-import' && state.archiveDraft?.kind==='import') { const d=state.archiveDraft,restoreSettings=!!app.querySelector('#archive-settings')?.checked; state.archiveDraft=null;renderOverlay();enqueueJob({key:`import:${d.gameDir}:${d.path}`,kind:'import',title:`导入 · ${d.manifest.name}`,gameDir:d.gameDir,run:async job=>{const result=await invoke('import_game',{gameDir:d.gameDir,path:d.path,javaPath:d.javaPath,jobId:job.id}); if(d.gameDir===state.gameDir) { state.selected=result.version; if(restoreSettings && result.launchSettings) Object.assign(state,result.launchSettings,{memoryMode:result.launchSettings.memoryMode==='auto'?'auto':'manual'}); persist(); } }});return; }
+ if(action==='stop-ipv6-room')await multiplayer.stop();
+ if(action==='import-game'){await archiveManager.openImport();return;}
+ if(action==='close-archive'||(action==='close-archive-backdrop'&&event.target.classList.contains('install-overlay'))){archiveManager.close();return;}
+ if(action==='confirm-export'){await archiveManager.confirmExport(!!app.querySelector('#archive-saves')?.checked,app.querySelector('input[name=archiveFormat]:checked')?.value||'ccl');return;}
+ if(action==='confirm-import'){archiveManager.confirmImport(!!app.querySelector('#archive-settings')?.checked);return;}
  if(action==='close-launch-view') { const crash=state.launchView?.crash;state.launchView=null;if(crash?.diagnosis)showCrashNotice(crash);renderOverlay();return; }
  if(action==='launch-account') {state.launchView=null;state.page='account';render();return;}
  const switchAccount=event.target.closest('[data-switch-account]');
@@ -317,16 +320,16 @@ app.addEventListener('click', async event => {
  if(action==='use-offline'||action==='continue-offline'){accountActions.useOffline();return;}
  if(action==='use-microsoft'){accountActions.useMicrosoft();return;}
  if(action==='logout-microsoft'){await accountActions.signOut();return;}
- if(action==='choose-skin' || action==='choose-cape') { const kind=action==='choose-skin'?'skin':'cape';try { const path=await openDialog({multiple:false,directory:false,filters:[{name:'PNG 图片',extensions:['png']}]}); if(typeof path!=='string') return;const data=await invoke('preview_texture',{path,kind});const file={path,data,name:path.split(/[\\/]/).pop(),...(kind==='skin'?{model:state.skinModel}:{})};if(kind==='skin') {state.localSkin=file;saveLocalSkin(file);}else state.localCape=file;render(); } catch(e) { flash(`无法预览图片：${e}`,'error'); } return; }
- if(action==='apply-offline-skin' && state.localSkin && !usingOnlineAccount() && selected()?.installed) {const version=state.selected,gameDir=state.gameDir,skin=state.localSkin.data,username=state.username;state.accountBusy=true;render();try{await invoke('apply_offline_skin',{gameDir,version,username,skin});offlineSkinInstances[instanceKey(gameDir,version)]=true;localStorage.setItem('ccl-offline-skin-instances',JSON.stringify(offlineSkinInstances));flash('皮肤已保存到实例；请确保已安装 CustomSkinLoader。');}catch(e){flash(`无法应用离线皮肤：${e}`,'error');}finally{state.accountBusy=false;render();}return;}
+ if(action==='choose-skin'||action==='choose-cape'){await skinController.choose(action==='choose-skin'?'skin':'cape');return;}
+ if(action==='apply-offline-skin'){await skinController.applyToOffline();return;}
  if(action==='find-offline-skin-mod') {state.contentKind='mod';state.contentSource='modrinth';state.contentTarget=state.selected;state.contentQuery='CustomSkinLoader';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];state.page='content';render();void searchContent(true);return;}
- if(action==='clear-skin') { state.localSkin=null;saveLocalSkin(null);render();return; }
- if(action==='clear-cape') { state.localCape=null;render();return; }
- if(action==='upload-skin' && state.localSkin && state.account) { state.accountBusy=true;render();try { await invoke('upload_account_skin',{path:state.localSkin.path,model:state.skinModel});state.localSkin=null;saveLocalSkin(null);await refreshAppearance();flash('皮肤已应用到正版账户。'); } catch(e) { flash(`应用皮肤失败：${e}`,'error'); } state.accountBusy=false;render();return; }
- if(action==='reset-skin' && state.account) { state.accountBusy=true;render();try { await invoke('reset_account_skin');state.localSkin=null;saveLocalSkin(null);await refreshAppearance();flash('已恢复账户默认皮肤。'); } catch(e) { flash(`恢复皮肤失败：${e}`,'error'); } state.accountBusy=false;render();return; }
- if(action==='hide-cape' && state.account) { state.accountBusy=true;render();try { await invoke('set_account_cape',{capeId:null});state.localCape=null;await refreshAppearance();flash('已隐藏账户披风。'); } catch(e) { flash(`更新披风失败：${e}`,'error'); } state.accountBusy=false;render();return; }
- const previewCape=event.target.closest('[data-preview-cape]'); if(previewCape) { const cape=state.appearance?.capes[Number(previewCape.dataset.previewCape)];if(cape) {state.previewCapeId=cape.id;state.localCape=null;render();}return; }
- const applyCape=event.target.closest('[data-apply-cape]'); if(applyCape && state.account) { const cape=state.appearance?.capes[Number(applyCape.dataset.applyCape)];if(!cape)return;state.accountBusy=true;render();try { await invoke('set_account_cape',{capeId:cape.id});state.localCape=null;await refreshAppearance();flash('已更新账户披风。'); } catch(e) { flash(`更新披风失败：${e}`,'error'); } state.accountBusy=false;render();return; }
+ if(action==='clear-skin'){skinController.clearSkin();return;}
+ if(action==='clear-cape'){skinController.clearCape();return;}
+ if(action==='upload-skin'){await skinController.upload();return;}
+ if(action==='reset-skin'){await skinController.reset();return;}
+ if(action==='hide-cape'){await skinController.hideCape();return;}
+ const previewCape=event.target.closest('[data-preview-cape]');if(previewCape){skinController.previewCape(Number(previewCape.dataset.previewCape));return;}
+ const applyCape=event.target.closest('[data-apply-cape]');if(applyCape){await skinController.applyCape(Number(applyCape.dataset.applyCape));return;}
  if(action==='close-instance-settings'){state.instanceSettingsView=null;renderOverlay();return;}
  if(action==='reset-instance-settings'){instanceLaunch.reset();return;}
  if(action==='check-update') {void checkLauncherUpdate(true);return;}
@@ -355,8 +358,8 @@ app.addEventListener('click', async event => {
  if(action==='manage-confirm' && state.manageView?.confirm && !state.manageView.busy){const d=state.manageView,choice=d.confirm;if(choice.action==='restore')await manageOperation('restore_backup',{backupId:choice.item.id},'备份已恢复，恢复前的实例也已备份。');else if(d.kind==='backups')await manageOperation('delete_backup',{backupId:choice.item.id},'备份已删除。');else await manageOperation('delete_world',{folder:choice.item.folder},'存档已删除，并已创建备份。');}
 
  if (action === 'open-log' || action === 'open-crash-log') { const crash=state.crashDialog || state.launchView?.crash || state.crash;const version=action==='open-crash-log' ? crash?.version : state.selected; const gameDir=action==='open-crash-log' ? crash?.gameDir : state.gameDir; if(version) { try { if(action==='open-crash-log' && !crash.logName)throw new Error('无法确定本次启动的日志文件');await invoke('open_game_log',{gameDir,version,logName:action==='open-crash-log' ? crash.logName : null}); } catch(e) { flash(String(e),'error'); } } }
- if(action==='close-mod-dialog' || (action==='close-mod-backdrop' && event.target.classList.contains('install-overlay'))) { state.modDraft=null; renderOverlay(); }
- if(action==='confirm-mod-install' && state.modDraft) { const draft=state.modDraft;if(draft.installed)return;const modVersionId=app.querySelector('input[name=modVersion]:checked')?.value;if(draft.kind!=='modpack'&&!modVersionId)return;state.modDraft=null;renderOverlay();if(draft.kind==='modpack') enqueueJob({key:`modpack:${draft.source}:${draft.projectId}:${draft.gameDir}`,kind:'modpack',title:draft.title,gameDir:draft.gameDir,recipe:{type:'modpack',gameDir:draft.gameDir,source:draft.source,projectId:draft.projectId,javaPath:draft.javaPath},run:job=>invoke('install_modpack',{gameDir:draft.gameDir,source:draft.source,projectId:draft.projectId,apiKey:draft.apiKey,javaPath:draft.javaPath,jobId:job.id})});else if(draft.kind==='mod') enqueueJob({key:`mod:${draft.source}:${draft.projectId}:${draft.gameDir}:${draft.target}`,kind:'mod',title:`${draft.title} · ${draft.target}`,gameDir:draft.gameDir,version:draft.target,recipe:{type:'mod',gameDir:draft.gameDir,version:draft.target,source:draft.source,projectId:draft.projectId,modVersionId},run:job=>invoke('install_mod',{gameDir:draft.gameDir,version:draft.target,source:draft.source,projectId:draft.projectId,apiKey:draft.apiKey,modVersionId,jobId:job.id})});else {const recipe={type:'pack',kind:draft.kind,gameDir:draft.gameDir,version:draft.target,source:draft.source,projectId:draft.projectId,packVersionId:modVersionId};enqueueJob({key:`${draft.kind}:${draft.source}:${draft.projectId}:${draft.gameDir}:${draft.target}`,kind:draft.kind,title:`${draft.title} · ${draft.target}`,gameDir:draft.gameDir,version:draft.target,recipe,run:runnerFor(recipe)});} }
+ if(action==='close-mod-dialog'||(action==='close-mod-backdrop'&&event.target.classList.contains('install-overlay')))contentInstallManager.close();
+ if(action==='confirm-mod-install')contentInstallManager.confirm(app.querySelector('input[name=modVersion]:checked')?.value);
  if (action === 'close-install' || (action === 'close-install-backdrop' && event.target.classList.contains('install-overlay'))) { state.installDraft = null; renderOverlay(); }
  if (action === 'confirm-install' && state.installDraft) { const draft={...state.installDraft,addons:[...state.installDraft.addons]}; state.installDraft=null; renderOverlay(); queueVersion(draft); }
  if (action === 'clear-jobs') { state.jobs=state.jobs.filter(j=>!['done','failed','cancelled'].includes(j.status));saveJobs(); if (state.page==='downloads') render(); else renderChrome(); }
@@ -366,14 +369,14 @@ app.addEventListener('click', async event => {
  if(action==='open-pack-folder' && state.contentTarget) {try{await invoke('open_pack_folder',{gameDir:state.gameDir,version:state.contentTarget,kind:state.contentKind});}catch(e){flash(`无法打开文件夹：${e}`,'error');}}
  if(action==='find-shader-support') {state.contentKind='mod';state.contentQuery=event.target.closest('[data-query]')?.dataset.query||'Iris';state.contentPage=0;state.contentLoaded=false;state.contentResults=[];packManager.invalidate();state.packDelete=null;const query=app.querySelector('#content-form [name=query]');if(query)query.value=state.contentQuery;render();await searchContent();}
  if(action==='cancel-pack-remove') {state.packDelete=null;render();}
- if(action==='confirm-pack-remove' && state.packDelete && !state.packWorking) {const item=state.packDelete;state.packDelete=null;state.packWorking=true;render();try{await invoke('remove_local_pack',item);flash('资源包已删除。');if(item.version===state.contentTarget&&item.gameDir===state.gameDir&&item.kind===state.contentKind){await refreshPacks();contentSearch.invalidate();state.contentLoaded=false;await searchContent();}}catch(e){flash(`删除失败：${e}`,'error');}finally{state.packWorking=false;if(state.page==='content')render();}}
- if(action==='check-pack-updates' && !state.packChecking && !state.packWorking && state.contentTarget) {const version=state.contentTarget,gameDir=state.gameDir,kind=state.contentKind,epoch=packManager.revision();state.contentKey=String(app.querySelector('#content-form [name=apiKey]')?.value || state.contentKey).trim();state.packChecking=true;state.packUpdates=null;renderLocalPacks();try{const result=await invoke('check_pack_updates',{gameDir,version,kind,apiKey:state.contentKey});if(epoch===packManager.revision() && version===state.contentTarget && gameDir===state.gameDir && kind===state.contentKind)state.packUpdates=result;}catch(e){flash(`检查更新失败：${e}`,'error');}finally{state.packChecking=false;renderLocalPacks();}}
+ if(action==='confirm-pack-remove')await packManager.confirmRemove();
+ if(action==='check-pack-updates'){state.contentKey=String(app.querySelector('#content-form [name=apiKey]')?.value||state.contentKey).trim();await packManager.checkUpdates();}
 
  if (action === 'cancel-mod-remove') { state.modDelete = null; render(); }
  if (action === 'confirm-mod-remove') { const names=state.modDelete || [];state.modDelete=null;render();await applyModChanges('delete',names); }
  if (action === 'bulk-mod-enable' || action === 'bulk-mod-disable') await applyModChanges(action==='bulk-mod-enable'?'enable':'disable',[...state.selectedMods]);
- if(action==='check-mod-conflicts' && !state.modConflictsLoading && !state.modWorking && state.contentTarget){const version=state.contentTarget,gameDir=state.gameDir,epoch=modManager.revision();state.modConflictsLoading=true;state.modConflicts=null;renderLocalMods();try{const result=await invoke('check_mod_conflicts',{gameDir,version});if(epoch===modManager.revision() && version===state.contentTarget && gameDir===state.gameDir)state.modConflicts=result;}catch(e){flash(`排查失败：${e}`,'error');}finally{state.modConflictsLoading=false;renderLocalMods();}}
- if (action === 'check-mod-updates' && !state.modChecking && !state.modWorking && state.contentTarget) {const version=state.contentTarget,gameDir=state.gameDir,epoch=modManager.revision();state.modChecking=true;state.modUpdates=null;renderLocalMods();try {const result=await invoke('check_mod_updates',{gameDir,version});if(version===state.contentTarget && gameDir===state.gameDir && epoch===modManager.revision() && !state.modWorking)state.modUpdates=result;}catch(e){flash(`检查更新失败：${e}`,'error');}finally{state.modChecking=false;if(state.page==='content')renderLocalMods();} }
+ if(action==='check-mod-conflicts')await modManager.checkConflicts();
+ if(action==='check-mod-updates')await modManager.checkUpdates();
  if (action === 'bulk-mod-delete' && state.selectedMods.size && !state.modWorking) { state.modDelete=[...state.selectedMods];render(); }
  if (action === 'cancel-java-remove') { state.javaDelete = null; render(); }
  if (action === 'confirm-java-remove') { const java = state.javaRuntimes[state.javaDelete]; state.javaDelete = null; if (java?.managed) { try { await invoke('remove_java', { major: java.major }); if (state.javaPath === java.path) { state.javaPath = 'java'; persist(); } state.notice = `Java ${java.major} 已删除。`; state.noticeKind = ''; await refreshJava(); } catch (e) { flash(`删除失败：${e}`, 'error'); } } }
@@ -388,7 +391,7 @@ app.addEventListener('change', async event => {
  if(event.target.id==='memory-mode' || event.target.id==='instance-memory-mode' || ['overrideJava','overrideMemory','overrideArgs'].includes(event.target.name)) {syncMemoryControls();return;}
  if(event.target.id==='server-status') { state.serverStatus=event.target.value;state.serverPage=0;updateSearchResults('server');return; }
  if(event.target.id==='server-page-jump'){const max=Math.max(0,Math.ceil(filteredServers().length/40)-1),n=Number(event.target.value);if(Number.isInteger(n)){state.serverPage=Math.max(0,Math.min(max,n-1));updateSearchResults('server');}return;}
- if(event.target.id==='skin-model') { state.skinModel=event.target.value;if(state.localSkin){state.localSkin.model=state.skinModel;saveLocalSkin(state.localSkin);}render();return; }
+ if(event.target.id==='skin-model'){skinController.setModel(event.target.value);return;}
  if(event.target.id==='job-limit') { state.jobLimit=Math.max(1,Math.min(5,Number(event.target.value)||3));persist();render();pumpJobs();return; }
  if(event.target.id==='local-mod-filter') {state.modFilter=event.target.value;renderLocalMods();return;}
  if(event.target.id==='mod-select-visible') {const matches=state.localMods.filter(m=>m.name.toLocaleLowerCase().includes(state.modQuery.trim().toLocaleLowerCase()) && (state.modFilter==='all'||m.enabled===(state.modFilter==='enabled')));for(const m of matches) event.target.checked?state.selectedMods.add(m.name):state.selectedMods.delete(m.name);renderLocalMods();return;}
@@ -400,15 +403,28 @@ app.addEventListener('change', async event => {
 
 });
 app.addEventListener('submit', async event => { if(event.target.id==='instance-settings-form') {event.preventDefault();instanceLaunch.save(event.target);return;
-} if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentSort=data.get('sort');state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey);state.contentCategory=String(data.get('category')||state.contentCategory);state.contentGameFilter=String(data.get('gameFilter')||'').trim();state.contentLoaderFilter=String(data.get('loaderFilter')||'');state.contentEnvironment=String(data.get('environment')||'');state.contentPage=0;state.contentHasMore=false;void loadContentCategories(); await searchContent(true); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; const selectedVersion=state.versions.find(v=>v.id===state.selected && v.installed),isolationControl=event.target.querySelector('#version-isolation'),isolationChanged=selectedVersion && isolationControl && !isolationControl.disabled && isolationControl.checked!==!!selectedVersion.isolated; if(isolationChanged && state.gameDir!==data.get('gameDir').trim()) {flash('请先保存游戏目录，再修改版本隔离。','error');return;} if(isolationChanged && state.jobs.some(j=>j.gameDir===state.gameDir && ['queued','running','canceling'].includes(j.status))) {flash('该游戏目录有进行中或等待中的任务，请先取消或等待结束。','error');return;} try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } if(isolationChanged) { try { await invoke('set_version_isolation',{gameDir:state.gameDir,version:selectedVersion.id,isolated:isolationControl.checked});selectedVersion.isolated=isolationControl.checked;state.localMods=[];state.contentResults=[];state.contentLoaded=false;state.modUpdates=null;state.selectedMods.clear();modManager.invalidate(); } catch(e) {flash(`无法修改版本隔离：${e}`,'error');return;} } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory') ?? state.memory), memoryMode:data.get('memoryMode')==='auto'?'auto':'manual', optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); if(changed){state.selectedMods.clear();state.modUpdates=null;state.modConflicts=null;modManager.invalidate();} render(); flash('设置已保存。'); if (changed) await refresh(); });
+} if(event.target.id==='lan-host-form'){event.preventDefault();await multiplayer.host(Number(event.target.elements.lanGamePort.value));return;} if(event.target.id==='lan-test-form'){event.preventDefault();await multiplayer.test(event.target.elements.lanTarget.value);return;} if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentSort=data.get('sort');state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey);state.contentCategory=String(data.get('category')||state.contentCategory);state.contentGameFilter=String(data.get('gameFilter')||'').trim();state.contentLoaderFilter=String(data.get('loaderFilter')||'');state.contentEnvironment=String(data.get('environment')||'');state.contentPage=0;state.contentHasMore=false;void loadContentCategories(); await searchContent(true); return; } if(event.target.id==='settings-form'){event.preventDefault();await globalSettings.save(event.target);} });
+const globalSettings=createGlobalSettings({state,render,persist,flash,invalidateMods:modManager.invalidate,refresh,
+ configureProxy:proxyUrl=>invoke('configure_proxy',{proxyUrl}),setIsolation:(gameDir,version,isolated)=>invoke('set_version_isolation',{gameDir,version,isolated})});
 const gameEvents=createGameEvents({state,render,renderOverlay,showCrash:showCrashNotice,refreshStats:gameProfile.loadStats});
 const restoreAccount=createAccountRestorer({state,restore:()=>invoke('restore_microsoft_account'),restoreAvatar:restoreOnlineAvatar,refreshAppearance:()=>refreshAppearance({reuse:true}),render,persist,flash});
 const accountActions=createAccountActions({state,render,persist,flash,restore:restoreAccount,restoreAvatar:restoreOnlineAvatar,cacheAvatar:cacheOnlineAvatar,refreshAppearance,refreshAccounts:refreshAccountList,
  switchAccount:uuid=>invoke('switch_microsoft_account',{uuid}),beginLogin:()=>invoke('begin_microsoft_login'),completeLogin:()=>invoke('complete_microsoft_login'),cancelLogin:()=>invoke('cancel_microsoft_login'),remember:()=>invoke('remember_microsoft_account'),openLogin:()=>invoke('open_microsoft_login'),logout:()=>invoke('logout_microsoft')});
+const skinController=createSkinController({state,storage:localStorage,isOnline:usingOnlineAccount,render,flash,saveSkin:saveLocalSkin,refreshAppearance,
+ chooseFile:()=>openDialog({multiple:false,directory:false,filters:[{name:'PNG 图片',extensions:['png']}]}),
+ previewTexture:(path,kind)=>invoke('preview_texture',{path,kind}),applyOffline:(gameDir,version,username,skin)=>invoke('apply_offline_skin',{gameDir,version,username,skin}),
+ uploadSkin:(path,model)=>invoke('upload_account_skin',{path,model}),resetSkin:()=>invoke('reset_account_skin'),setCape:capeId=>invoke('set_account_cape',{capeId})});
 const launchGame=createGameLauncher({state,isOnline:usingOnlineAccount,restoreAccount:()=>restoreAccount({notify:false}),
- shouldApplySkin:(gameDir,version)=>offlineSkinInstances[instanceKey(gameDir,version)]===true,
+ shouldApplySkin:skinController.shouldApply,
  applySkin:(gameDir,version,username,skin)=>invoke('apply_offline_skin',{gameDir,version,username,skin}),
  settings:effectiveLaunchSettings,launch:options=>invoke('launch_game',{options}),render:renderOverlay,flash});
+const versionDelete=createVersionDelete({state,render,persist,flash,refreshInstalled,remove:(gameDir,version,removeInstance)=>invoke('delete_version',{gameDir,version,removeInstance})});
+const contentInstallManager=createContentInstall({state,render:renderOverlay,enqueue:enqueueJob,runnerFor,openDetails:contentDetail.open,
+ installModpack:args=>invoke('install_modpack',args),installMod:args=>invoke('install_mod',args)});
+const archiveManager=createArchiveManager({state,render:renderOverlay,persist,flash,enqueue:enqueueJob,
+ chooseImport:()=>openDialog({multiple:false,directory:false,filters:[{name:'CCL 或 PCL 兼容整合包',extensions:['zip','mrpack']}]}),
+ chooseExport:(version,format)=>saveDialog({defaultPath:`CCL-${version}.${format==='pcl'?'mrpack':'zip'}`,filters:[{name:format==='pcl'?'PCL 兼容整合包':'CCL 游戏导出包',extensions:[format==='pcl'?'mrpack':'zip']}]}),
+ inspect:path=>invoke('inspect_game_archive',{path}),exportGame:args=>invoke('export_game',args),importGame:args=>invoke('import_game',args)});
 async function init() {
  updateDefaultBanner();
  window.setInterval(updateDefaultBanner,60*1000);

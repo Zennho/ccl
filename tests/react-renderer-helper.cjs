@@ -55,4 +55,9 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/shell.tsx',['Shell']);
  load(window,'react/instance-settings-model.ts',['normalizeInstanceSettings','resolveInstanceSettings']);
  load(window,'lib/instance-launch-settings.ts',['createInstanceLaunchSettings']);
+ load(window,'lib/archive-manager.ts',['createArchiveManager']);
+ load(window,'lib/version-delete.ts',['createVersionDelete']);
+ load(window,'lib/skin-controller.ts',['createSkinController']);
+ load(window,'lib/content-install.ts',['createContentInstall']);
+ load(window,'lib/global-settings.ts',['createGlobalSettings']);
 };

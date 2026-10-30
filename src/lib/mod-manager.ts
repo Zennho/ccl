@@ -2,7 +2,7 @@ interface LocalMod { name:string; enabled:boolean }
 type ModAction = 'delete' | 'enable' | 'disable';
 interface ModState {
  page:string; contentTarget:string; gameDir:string; localMods:LocalMod[]; selectedMods:Set<string>;
- modWorking:boolean; modUpdates:unknown; modConflicts:unknown; contentResults:unknown[];
+ modWorking:boolean; modChecking:boolean; modConflictsLoading:boolean; modUpdates:unknown; modConflicts:unknown; contentResults:unknown[];
  notice:string; noticeKind:string;
 }
 interface Options {
@@ -10,8 +10,9 @@ interface Options {
  list:(gameDir:string,version:string)=>Promise<LocalMod[]>;
  remove:(gameDir:string,version:string,name:string)=>Promise<unknown>;
  setEnabled:(gameDir:string,version:string,name:string,enabled:boolean)=>Promise<unknown>;
+ conflicts:(gameDir:string,version:string)=>Promise<unknown>;updates:(gameDir:string,version:string)=>Promise<unknown>;
 }
-export function createModManager({state,render,search,flash,list,remove,setEnabled}:Options) {
+export function createModManager({state,render,search,flash,list,remove,setEnabled,conflicts,updates}:Options) {
  let epoch=0;
  async function refreshMods() {
   const version=state.contentTarget,gameDir=state.gameDir;
@@ -38,5 +39,17 @@ export function createModManager({state,render,search,flash,list,remove,setEnabl
   if(version===state.contentTarget&&gameDir===state.gameDir){state.selectedMods.clear();await refreshMods();if(action==='delete'&&state.contentResults.length)await search();}
   flash(failed.length?`已处理 ${done} 个，${failed.length} 个失败：${failed.join('；')}`:`已处理 ${done} 个模组。`,failed.length?'error':'');
  }
- return {refreshMods,applyModChanges,revision:()=>epoch,invalidate:()=>{epoch++;}};
+ async function checkConflicts(){
+  if(state.modConflictsLoading||state.modWorking||!state.contentTarget)return;
+  const version=state.contentTarget,gameDir=state.gameDir,revision=epoch;state.modConflictsLoading=true;state.modConflicts=null;render();
+  try{const result=await conflicts(gameDir,version);if(revision===epoch&&version===state.contentTarget&&gameDir===state.gameDir)state.modConflicts=result;}
+  catch(error){flash(`排查失败：${error}`,'error');}finally{state.modConflictsLoading=false;render();}
+ }
+ async function checkUpdates(){
+  if(state.modChecking||state.modWorking||!state.contentTarget)return;
+  const version=state.contentTarget,gameDir=state.gameDir,revision=epoch;state.modChecking=true;state.modUpdates=null;render();
+  try{const result=await updates(gameDir,version);if(version===state.contentTarget&&gameDir===state.gameDir&&revision===epoch&&!state.modWorking)state.modUpdates=result;}
+  catch(error){flash(`检查更新失败：${error}`,'error');}finally{state.modChecking=false;if(state.page==='content')render();}
+ }
+ return {refreshMods,applyModChanges,checkConflicts,checkUpdates,revision:()=>epoch,invalidate:()=>{epoch++;}};
 }

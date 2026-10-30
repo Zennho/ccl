@@ -1,7 +1,6 @@
 import React from 'react';
 import { Icon } from './pages';
-interface Manifest { name: string; gameVersion: string; loader: string; loaderVersion?: string; includeSaves: boolean; format: string; launchSettings?: unknown }
-type ArchiveDraft = {kind:'export';version:string} | {kind:'import';manifest:Manifest};
+import type {ArchiveDraft} from '../lib/archive-manager';
 export function ArchiveDialog({draft}:{draft:ArchiveDraft}) {
  const exporting=draft.kind==='export',manifest=exporting?null:draft.manifest;
  return <div className="install-overlay" data-action="close-archive-backdrop"><section className="install-dialog archive-dialog" role="dialog" aria-modal="true" aria-labelledby="archive-title"><div className="install-dialog-head"><div><span className="section-index">{exporting?'EXPORT / GAME INSTANCE':'IMPORT / GAME INSTANCE'}</span><h2 id="archive-title">{exporting?'导出':'导入'} <em>{exporting?draft.version:manifest!.name}</em></h2><p>{exporting?'打包游戏数据，选择适合的导出格式。':'创建独立游戏目录，不覆盖已有版本。'}</p></div><button className="icon-button" data-action="close-archive" aria-label="关闭"><Icon name="x" size={19}/></button></div>
