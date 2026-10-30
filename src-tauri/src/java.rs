@@ -9,7 +9,6 @@ use std::{
     time::Duration,
 };
 use tauri::Emitter;
-use tokio::io::AsyncWriteExt;
 
 use crate::{http_client, ResultT};
 
@@ -318,13 +317,28 @@ async fn install_impl(
         if !link.starts_with("https://") { return Err("Java 下载地址无效".into()); }
         let archive_path = staging.join("download.archive");
         let slot = crate::jobs::race(job_id, crate::download_slot()).await?;
-        let mut response = crate::jobs::race(job_id, async { client.get(link).timeout(Duration::from_secs(900)).send().await.map_err(|e| format!("Java 下载失败: {e:#}"))?.error_for_status().map_err(|e| e.to_string()) }).await?;
-        let total = response.content_length().or_else(|| package["size"].as_u64()).unwrap_or(0);
-        let mut file = tokio::fs::File::create(&archive_path).await.map_err(|e| e.to_string())?;
-        let mut hash = Sha256::new(); let mut current = 0u64; let mut last_progress = std::time::Instant::now();
-        while let Some(chunk) = crate::jobs::race(job_id, async { response.chunk().await.map_err(|e| format!("Java 下载中断: {e:#}")) }).await? { hash.update(&chunk); file.write_all(&chunk).await.map_err(|e| e.to_string())?; current += chunk.len() as u64; if last_progress.elapsed() >= Duration::from_millis(250) { progress(app, job_id, "正在下载 Java", current, total); last_progress = std::time::Instant::now(); } }
-        file.flush().await.map_err(|e| e.to_string())?; drop(file); drop(slot);
-        if format!("{:x}", hash.finalize()) != checksum.to_ascii_lowercase() { return Err("Java 文件 SHA-256 校验失败".into()); }
+        crate::jobs::race(job_id, crate::transfer::download_parallel(
+            &client, link, &archive_path, 2 * 1024 * 1024 * 1024,
+            |current, total| progress(app, job_id, "正在下载 Java", current, total),
+        )).await?;
+        drop(slot);
+        progress(app, job_id, "正在校验 Java 文件", 0, 0);
+        let hash_path = archive_path.clone();
+        let hash_job = job_id.map(str::to_owned);
+        let hash = tokio::task::spawn_blocking(move || -> ResultT<String> {
+            use std::io::Read;
+            let mut file = fs::File::open(hash_path).map_err(|e| e.to_string())?;
+            let mut hash = Sha256::new();
+            let mut buffer = [0u8; 64 * 1024];
+            loop {
+                crate::jobs::check(hash_job.as_deref())?;
+                let size = file.read(&mut buffer).map_err(|e| e.to_string())?;
+                if size == 0 { break; }
+                hash.update(&buffer[..size]);
+            }
+            Ok(format!("{:x}", hash.finalize()))
+        }).await.map_err(|e| e.to_string())??;
+        if hash != checksum.to_ascii_lowercase() { return Err("Java 文件 SHA-256 校验失败".into()); }
         progress(app, job_id, "正在解压并验证 Java", 0, 0);
         let unpack_dir = staging.join("runtime"); fs::create_dir_all(&unpack_dir).map_err(|e| e.to_string())?;
         let archive = archive_path.clone(); let extract = unpack_dir.clone();

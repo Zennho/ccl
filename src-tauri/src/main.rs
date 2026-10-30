@@ -11,6 +11,7 @@ mod jobs;
 mod lan;
 mod lan_core;
 mod loaders;
+mod local_mod;
 mod memory;
 mod modcheck;
 mod overview;
@@ -433,15 +434,32 @@ async fn download(
                 selected = Some(is_mirror);
                 break;
             }
-            match transfer::download_resume(
-                client,
-                &candidate,
-                &temporary,
-                1024 * 1024 * 1024,
-                |_, _| {},
-            )
-            .await
-            {
+            let is_client_jar = dest.extension().is_some_and(|ext| ext == "jar")
+                && dest
+                    .parent()
+                    .and_then(|p| p.parent())
+                    .and_then(Path::file_name)
+                    .is_some_and(|name| name == "versions");
+            let result = if is_client_jar {
+                transfer::download_parallel_resume(
+                    client,
+                    &candidate,
+                    &temporary,
+                    1024 * 1024 * 1024,
+                    |_, _| {},
+                )
+                .await
+            } else {
+                transfer::download_resume(
+                    client,
+                    &candidate,
+                    &temporary,
+                    1024 * 1024 * 1024,
+                    |_, _| {},
+                )
+                .await
+            };
+            match result {
                 Ok(()) => match file_sha1(&temporary) {
                     Ok(hash) if hash.eq_ignore_ascii_case(expected) => {
                         selected = Some(is_mirror);
@@ -533,6 +551,15 @@ fn default_game_dir() -> ResultT<String> {
         .to_string_lossy()
         .to_string())
 }
+fn version_kind(kind: Option<&str>) -> &'static str {
+    match kind {
+        Some("snapshot") => "快照版",
+        Some("old_beta") => "旧版 Beta",
+        Some("old_alpha") => "旧版 Alpha",
+        Some("release") | None => "正式版",
+        _ => "其他版本",
+    }
+}
 #[tauri::command]
 async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
     let client = http_client()?;
@@ -542,7 +569,6 @@ async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
         .as_array()
         .ok_or("版本清单格式错误")?
         .iter()
-        .filter(|v| v["type"] == "release")
         .filter_map(|v| {
             let id = v["id"].as_str()?;
             if version_id(id).is_err() {
@@ -551,7 +577,7 @@ async fn list_versions(game_dir: String) -> ResultT<Vec<Version>> {
             Some(Version {
                 id: id.into(),
                 name: id.into(),
-                kind: "正式版".into(),
+                kind: version_kind(v["type"].as_str()).into(),
                 released: v["releaseTime"]
                     .as_str()
                     .unwrap_or("")
@@ -608,7 +634,7 @@ fn installed_versions(game_dir: String) -> ResultT<Vec<Version>> {
                         Some("quilt") => "Quilt",
                         Some("forge") => "Forge",
                         Some("neoforge") => "NeoForge",
-                        _ => "正式版",
+                        _ => version_kind(meta["type"].as_str()),
                     }
                 };
                 let name = meta["cclPackName"].as_str().unwrap_or(&id).to_string();
@@ -676,8 +702,14 @@ async fn install_version_impl(
         .as_array()
         .ok_or("版本清单格式错误")?
         .iter()
-        .find(|v| v["id"] == version && v["type"] == "release")
-        .ok_or("未找到该正式版")?;
+        .find(|v| {
+            v["id"] == version
+                && matches!(
+                    v["type"].as_str(),
+                    Some("release" | "snapshot" | "old_beta" | "old_alpha")
+                )
+        })
+        .ok_or("未找到该游戏版本")?;
     let (meta_bytes, meta_mirrored) = fetch_bytes(
         &client,
         entry["url"].as_str().ok_or("缺少版本地址")?,

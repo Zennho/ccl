@@ -51,6 +51,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/instance-theme.tsx',['InstanceThemeDialog']);
  load(window,'react/game-profile.tsx',['GameProfileDialog']);
  load(window,'react/content.tsx',['ContentPage']);
+ load(window,'react/local-mod-dialog.tsx',['LocalModDialog']);
  load(window,'react/content-dialog.tsx',['ContentDialog']);
  load(window,'react/shell.tsx',['Shell']);
  load(window,'react/instance-settings-model.ts',['normalizeInstanceSettings','resolveInstanceSettings']);

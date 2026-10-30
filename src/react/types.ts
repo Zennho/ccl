@@ -31,3 +31,14 @@ export interface InstanceSettings extends InstanceLaunchOptions {
   overrideMemory: boolean;
   overrideArgs: boolean;
 }
+
+export interface LocalMod {
+  name: string;
+  enabled: boolean;
+  displayName?: string | null;
+  description?: string | null;
+  modId?: string | null;
+  version?: string | null;
+  icon?: string | null;
+  website?: string | null;
+}

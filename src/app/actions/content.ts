@@ -19,12 +19,16 @@ export function createContentHandler({container,state,invoke,render,renderOverla
     if(contentButton&&!state.contentBusy){const details=contentButton.hasAttribute('data-content-details'),index=Number(details?contentButton.dataset.contentDetails:contentButton.dataset.contentInstall),item=state.contentResults[index];return item?install.select(item,details):true;}
     const packRemove=target.closest<HTMLElement>('[data-pack-remove]');
     if(packRemove&&!state.packWorking){const item=state.localPacks[Number(packRemove.dataset.packRemove)];if(item){state.packDelete={name:item.name,kind:state.contentKind,version:state.contentTarget,gameDir:state.gameDir};render();}return true;}
+    const localDetails=target.closest<HTMLElement>('[data-local-mod-details]');
+    if(localDetails){const mod=state.localMods[Number(localDetails.dataset.localModDetails)];if(mod){state.localModDetail=mod;renderOverlay();}return true;}
     const modToggle=target.closest<HTMLElement>('[data-mod-toggle]');
     if(modToggle&&!state.contentBusy&&!state.modWorking){const mod=state.localMods[Number(modToggle.dataset.modToggle)];return mod?mods.applyModChanges(mod.enabled?'disable':'enable',[mod.name]):true;}
     const modRemove=target.closest<HTMLElement>('[data-mod-remove]');
     if(modRemove&&!state.modWorking){const mod=state.localMods[Number(modRemove.dataset.modRemove)];if(mod){state.modDelete=[mod.name];render();}return true;}
     const action=target.closest<HTMLElement>('[data-action]')?.dataset.action;
     switch(action){
+      case 'close-local-mod':state.localModDetail=null;renderOverlay();return true;
+      case 'close-local-mod-backdrop':if(target.classList.contains('install-overlay')){state.localModDetail=null;renderOverlay();}return true;
       case 'toggle-content-language':if(state.modDraft){state.modDraft.showOriginal=!state.modDraft.showOriginal;renderOverlay();}return true;
       case 'close-mod-dialog':install.close();return true;
       case 'close-mod-backdrop':if(target.classList.contains('install-overlay'))install.close();return true;

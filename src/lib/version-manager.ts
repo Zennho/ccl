@@ -8,7 +8,7 @@ export function createVersionManager({state,render,renderChrome,persist,loadCove
    const versions=await installed(dir);if(dir!==state.gameDir)return;
    const byId=new Map(versions.map(v=>[v.id,v]));
    if(state.online){const known=new Set(state.versions.map(v=>v.id)),extra=versions.filter(v=>!known.has(v.id));
-    state.versions=[...extra,...state.versions.map(v=>v.kind==='正式版'?{...v,installed:byId.has(v.id),isolated:!!byId.get(v.id)?.isolated,hasInstanceData:!!byId.get(v.id)?.hasInstanceData}:byId.get(v.id)).filter((v):v is GameVersion=>!!v)];
+    state.versions=[...extra,...state.versions.map(v=>['正式版','快照版','旧版 Beta','旧版 Alpha','其他版本'].includes(v.kind)?{...v,installed:byId.has(v.id),isolated:!!byId.get(v.id)?.isolated,hasInstanceData:!!byId.get(v.id)?.hasInstanceData}:byId.get(v.id)).filter((v):v is GameVersion=>!!v)];
    } else state.versions=versions;
    if(!versions.some(v=>v.id===state.selected)){state.selected=versions[0]?.id||'';persist();}
    loadCovers();if(state.page==='versions'||state.page==='home')render();else renderChrome();

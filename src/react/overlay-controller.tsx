@@ -6,6 +6,7 @@ import {ManageDialog} from './manage-dialog';
 import {InstanceOverviewDialog} from './instance-overview';
 import {InstallDialog} from './install-dialog';
 import {ArchiveDialog} from './archive-dialog';
+import {LocalModDialog} from './local-mod-dialog';
 import {ContentDialog} from './content-dialog';
 import type {createRenderer} from './renderer';
 import type {LauncherState} from '../lib/launcher-state';
@@ -24,6 +25,7 @@ export function createOverlayController({container,state,renderer,getLaunchSetti
   else if(state.instanceView)renderer.overlay(InstanceOverviewDialog,{view:state.instanceView});
   else if(state.installDraft)renderer.overlay(InstallDialog,{draft:state.installDraft,addons});
   else if(state.archiveDraft&&!state.modDraft)renderer.overlay(ArchiveDialog,{draft:state.archiveDraft});
+  else if(state.localModDetail)renderer.overlay(LocalModDialog,{mod:state.localModDetail});
   else if(state.modDraft)renderer.overlay(ContentDialog,{draft:state.modDraft,shaderEnv:state.shaderEnv,shaderEnvLoading:state.shaderEnvLoading},`content:${state.modDraft.source}:${state.modDraft.projectId}`);
   else renderer.overlay();
   syncMemory();

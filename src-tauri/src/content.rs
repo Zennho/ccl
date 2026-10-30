@@ -45,12 +45,7 @@ fn content_sort(source: &str, sort: &str) -> ResultT<&'static str> {
         _ => Err("未知排序方式".into()),
     }
 }
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalMod {
-    name: String,
-    enabled: bool,
-}
+use crate::local_mod::LocalMod;
 fn content_icon(value: &Value, source: &str) -> Option<String> {
     if source == "modrinth" {
         value["icon_url"].as_str()
@@ -1887,10 +1882,7 @@ pub fn list_mods(game_dir: String, version: String) -> ResultT<Vec<LocalMod>> {
             }
             let name = entry.file_name().to_string_lossy().into_owned();
             if name.ends_with(".jar") || name.ends_with(".jar.disabled") {
-                mods.push(LocalMod {
-                    enabled: name.ends_with(".jar"),
-                    name,
-                });
+                mods.push(crate::local_mod::read(&entry.path(), name));
             }
         }
     }
@@ -2057,17 +2049,33 @@ async fn fetch_file(
         return Err("下载地址必须使用 HTTPS".into());
     }
     let _slot = crate::download_slot().await?;
-    let bytes = client
-        .get(url)
-        .timeout(Duration::from_secs(300))
-        .send()
-        .await
-        .map_err(|e| format!("文件下载失败: {e:#}"))?
-        .error_for_status()
-        .map_err(|e| e.to_string())?
-        .bytes()
-        .await
-        .map_err(|e| e.to_string())?;
+    // Trusted hashes allow large mod and modpack files to use ranged transfers.
+    let bytes = if sha1.is_some() || sha512.is_some() {
+        let temporary = std::env::temp_dir().join(format!(
+            "ccl-content-{}-{}.part",
+            std::process::id(),
+            crate::TEMP_FILE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _cleanup = crate::jobs::CleanupPath::file(temporary.clone());
+        crate::transfer::download_parallel(client, url, &temporary, 1024 * 1024 * 1024, |_, _| {})
+            .await?;
+        tokio::fs::read(&temporary)
+            .await
+            .map_err(|e| e.to_string())?
+    } else {
+        client
+            .get(url)
+            .timeout(Duration::from_secs(300))
+            .send()
+            .await
+            .map_err(|e| format!("文件下载失败: {e:#}"))?
+            .error_for_status()
+            .map_err(|e| e.to_string())?
+            .bytes()
+            .await
+            .map_err(|e| e.to_string())?
+            .to_vec()
+    };
     if sha512.is_some_and(|expected| {
         format!("{:x}", Sha512::digest(&bytes)) != expected.to_ascii_lowercase()
     }) || sha1.is_some_and(|expected| {
@@ -2244,7 +2252,7 @@ async fn fetch_pack_file(
             let _ = tokio::fs::remove_file(path).await;
             crate::report(app, job_id, "校验失败，正在重新下载", 0, 0);
         }
-        crate::transfer::download(client, url, path, MAX_BYTES, |current, total| {
+        crate::transfer::download_parallel(client, url, path, MAX_BYTES, |current, total| {
             crate::report(
                 app,
                 job_id,
