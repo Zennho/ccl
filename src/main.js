@@ -25,6 +25,8 @@ import { createAccountAppearance } from './lib/account-appearance.ts';
 import { createInstanceTheme, instanceColors, instanceKey } from './lib/instance-theme.ts';
 import { readSettings, createInitialState, createTheme, persistSettings } from './lib/launcher-state.ts';
 import { createAppearanceController } from './lib/appearance-controller.ts';
+import { createContentDetail } from './lib/content-detail.ts';
+import { createGameLauncher } from './lib/game-launcher.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -89,7 +91,6 @@ function versionVisual(version) {
 }
 const hydrateThumbnails=createThumbnailLoader({container:app,fetchThumbnail:(kind,value)=>invoke('fetch_thumbnail',{kind,value})});
 const persist=()=>persistSettings(localStorage,state,theme);
-let launchSequence = 0;
 const usingOnlineAccount = () => state.accountPreference==='microsoft' && (state.accountKnown || !!state.account);
 const playerName = () => usingOnlineAccount() ? (state.account?.name || state.accountName || '正版账户') : state.username;
 const playerStatus = () => usingOnlineAccount() ? (state.account ? '微软账户' : state.accountRestoring ? '正在验证正版账户' : '正版账户 · 待验证') : '离线玩家';
@@ -137,8 +138,12 @@ const contentSearch=createContentSearch({state,modRevision:modManager.revision,r
  translate:(source,items)=>invoke('translate_content_summaries',{source,items})});
 const {loadContentCategories,searchContent}=contentSearch;
 
-function updateProjectLinks() { if(state.modDraft && app.querySelector('.mod-dialog')) renderOverlay(); }
-function updateProjectDescription() { if(state.modDraft && app.querySelector('.mod-dialog')) renderOverlay(); }
+const contentDetail=createContentDetail({state,render:renderOverlay,
+ lookup:(source,kind,projectUrl,title)=>invoke('lookup_mcmod',{source,kind,projectUrl,title}),
+ links:(source,projectId,apiKey)=>invoke('content_links',{source,projectId,apiKey}),
+ curseDescription:(projectId,apiKey)=>invoke('curseforge_description',{projectId,apiKey}),
+ versions:(kind,gameDir,version,source,projectId,apiKey)=>invoke(kind==='mod'?'list_mod_versions':'list_pack_versions',{gameDir,version,source,projectId,apiKey,...(kind==='mod'?{}:{kind})}),
+ translate:(source,projectId,description,summary)=>invoke('translate_content',{source,projectId,description,summary})});
 const accountAppearance=createAccountAppearance({state,container:app,render,renderChrome,flash,cacheAvatar:cacheOnlineAvatar,
  getAccounts:()=>invoke('list_microsoft_accounts'),getAppearance:()=>invoke('get_appearance'),
  createPreview:(canvas,skin,cape,model)=>import('./appearance-preview.ts').then(m=>m.createAppearancePreview(canvas,skin,cape,model))});
@@ -264,21 +269,14 @@ app.addEventListener('click', async event => {
  const contentPageButton=event.target.closest('[data-content-page]');if(contentPageButton && !state.contentBusy) {const page=Number(contentPageButton.dataset.contentPage);if(page>=0 && page<=332 && (page<=state.contentPage||state.contentHasMore)){state.contentPage=page;await searchContent();}return;}
  const projectLink=event.target.closest('[data-open-project]');
  if(projectLink) {const url=projectLink.dataset.openProject;if(url){try {await invoke('open_content_page',{url});} catch(e) {flash(`无法打开项目网址：${e}`,'error');}}return;}
- if(event.target.closest('[data-action="toggle-content-language"]') && state.modDraft){state.modDraft.showOriginal=!state.modDraft.showOriginal;updateProjectDescription();return;}
+ if(event.target.closest('[data-action="toggle-content-language"]') && state.modDraft){state.modDraft.showOriginal=!state.modDraft.showOriginal;renderOverlay();return;}
  const contentInstall = event.target.closest('[data-content-install], [data-content-details]');
  if (contentInstall && !state.contentBusy) {
   const isDetails=contentInstall.hasAttribute('data-content-details');
   const item=state.contentResults[Number(isDetails?contentInstall.dataset.contentDetails:contentInstall.dataset.contentInstall)]; if(!item) return;
-  const kind=state.contentKind,source=state.contentSource,apiKey=state.contentKey,gameDir=state.gameDir,target=state.contentTarget,javaPath=state.javaPath;
+  const kind=state.contentKind,source=state.contentSource,apiKey=state.contentKey,gameDir=state.gameDir,javaPath=state.javaPath;
   if(kind==='modpack' && !isDetails) {enqueueJob({key:`modpack:${source}:${item.id}:${gameDir}`,kind,title:item.title,gameDir,recipe:{type:'modpack',gameDir,source,projectId:item.id,javaPath},run:job=>invoke('install_modpack',{gameDir,source,projectId:item.id,apiKey,javaPath,jobId:job.id})});return;}
-  if(kind!=='modpack' && !target) return;
-  const draft={title:item.title,projectId:item.id,projectUrl:item.projectUrl,installed:!!item.installed,kind,source,apiKey,gameDir,target,javaPath,loading:kind!=='modpack',versions:[],error:'',links:[],linksLoading:true,linksError:false,summary:item.description||'',description:'',descriptionLoading:true,descriptionError:false,translation:'',translationLoading:true,showOriginal:false,encyclopedia:null};state.modDraft=draft;renderOverlay();
-  if((kind==='mod'||kind==='modpack') && item.projectUrl)void invoke('lookup_mcmod',{source,kind,projectUrl:item.projectUrl,title:item.title}).then(result=>{if(state.modDraft===draft && result?.url){draft.encyclopedia=result;updateProjectLinks();updateProjectDescription();}}).catch(()=>{});
-  const linkRequest=invoke('content_links',{source,projectId:item.id,apiKey}).then(info=>{if(state.modDraft===draft){draft.links=Array.isArray(info?.links)?info.links:[];draft.linksLoading=false;if(source==='modrinth'){draft.description=typeof info?.description==='string'?info.description:'';draft.descriptionLoading=false;}updateProjectLinks();updateProjectDescription();}}).catch(()=>{if(state.modDraft===draft){draft.linksLoading=false;draft.linksError=true;if(source==='modrinth'){draft.descriptionLoading=false;draft.descriptionError=true;}updateProjectLinks();updateProjectDescription();}});
-  const descriptionRequest=source==='curseforge'?invoke('curseforge_description',{projectId:item.id,apiKey}).then(description=>{if(state.modDraft===draft){draft.description=typeof description==='string'?description:'';draft.descriptionLoading=false;updateProjectDescription();}}).catch(()=>{if(state.modDraft===draft){draft.descriptionLoading=false;draft.descriptionError=true;updateProjectDescription();}}):Promise.resolve();
-  const versionRequest=kind!=='modpack' ? invoke(kind==='mod'?'list_mod_versions':'list_pack_versions',{gameDir,version:target,source,projectId:item.id,apiKey,...(kind==='mod'?{}:{kind})}).then(versions=>{if(state.modDraft===draft){draft.versions=versions;draft.loading=false;renderOverlay();}}).catch(e=>{if(state.modDraft===draft){draft.error=String(e);draft.loading=false;renderOverlay();}}) : Promise.resolve();
-  void Promise.all([linkRequest,descriptionRequest]).then(async()=>{if(state.modDraft!==draft)return;try{const translated=await invoke('translate_content',{source,projectId:item.id,description:draft.description,summary:draft.summary});if(state.modDraft===draft && typeof translated==='string')draft.translation=translated;}catch{}finally{if(state.modDraft===draft){draft.translationLoading=false;updateProjectDescription();}}});
-  await versionRequest;return;
+  await contentDetail.open(item);return;
  }
  const packRemove=event.target.closest('[data-pack-remove]');if(packRemove && !state.packWorking){const item=state.localPacks[Number(packRemove.dataset.packRemove)];if(item){state.packDelete={name:item.name,kind:state.contentKind,version:state.contentTarget,gameDir:state.gameDir};render();}return;}
  const modToggle = event.target.closest('[data-mod-toggle]');
@@ -388,26 +386,7 @@ app.addEventListener('click', async event => {
  if (action === 'bulk-mod-delete' && state.selectedMods.size && !state.modWorking) { state.modDelete=[...state.selectedMods];render(); }
  if (action === 'cancel-java-remove') { state.javaDelete = null; render(); }
  if (action === 'confirm-java-remove') { const java = state.javaRuntimes[state.javaDelete]; state.javaDelete = null; if (java?.managed) { try { await invoke('remove_java', { major: java.major }); if (state.javaPath === java.path) { state.javaPath = 'java'; persist(); } state.notice = `Java ${java.major} 已删除。`; state.noticeKind = ''; await refreshJava(); } catch (e) { flash(`删除失败：${e}`, 'error'); } } }
- if (action === 'launch') {
-  if(state.launchView)return;
-  const online=usingOnlineAccount(),view={id:`${Date.now()}-${++launchSequence}`,version:state.selected,phase:online&&!state.account?'authenticating':'preparing',error:'',warning:'',authError:false};
-  state.launchView=view;state.crashDialog=null;renderOverlay();
-  try {
-   if(online && !state.account) {
-    const account=await restoreAccount({notify:false});
-    if(state.launchView!==view)return;
-    if(state.accountPreference!=='microsoft')throw new Error('账户模式已更改，请重新启动游戏。');
-    if(!account){view.authError=true;throw new Error(state.accountRestoreError||'无法恢复正版账户，请前往账户页面重新登录。');}
-    view.phase='preparing';renderOverlay();
-   }
-   if(state.launchView!==view)return;
-   if(!online && state.localSkin?.data && offlineSkinInstances[instanceKey(state.gameDir,view.version)]===true) await invoke('apply_offline_skin',{gameDir:state.gameDir,version:view.version,username:state.username,skin:state.localSkin.data});
-   if(state.launchView!==view)return;
-   const launchSettings=effectiveLaunchSettings(state.gameDir,view.version);
-   await invoke('launch_game', { options: { launchId:view.id,version: view.version, username: state.username, javaPath: launchSettings.javaPath, gameDir: state.gameDir, memory: Number(launchSettings.memory), memoryMode:launchSettings.memoryMode, optimize:launchSettings.optimize, jvmArgs:launchSettings.jvmArgs, gameArgs:launchSettings.gameArgs, accountMode:online?'microsoft':'offline' } });
-   if(state.launchView===view && view.phase==='preparing') { view.phase='waiting';renderOverlay(); }
-  } catch (e) { if(state.launchView===view) { view.phase='failed';view.error=String(e);if(online && /微软|Xbox|正版|登录|账户|授权/i.test(view.error))view.authError=true;renderOverlay(); } else flash(`启动失败：${e}`, 'error'); }
- }
+ if(action==='launch')await launchGame();
 });
 app.addEventListener('change', async event => {
  if(event.target.matches('[data-instance-cover]') && state.themeView){const file=event.target.files?.[0];if(file)await instanceTheme.chooseCover(file);return;}
@@ -441,6 +420,10 @@ app.addEventListener('submit', async event => { if(event.target.id==='instance-s
 } if(event.target.id==='lan-host-form') { event.preventDefault(); if(state.lanBusy||state.lanRoom) return; const port=Number(event.target.elements.lanGamePort.value); if(!Number.isInteger(port)||port<1||port>65535) { flash('请输入 1–65535 的游戏局域网端口。','error');return; } state.lanPort=String(port);state.lanBusy=true;render();try { const relayPort=await invoke('start_ipv6_room',{gamePort:port});state.lanRoom={port:relayPort};await refreshLanAddresses(); } catch(e) { flash(`创建房间失败：${e}`,'error'); } finally { state.lanBusy=false;render(); } return; } if(event.target.id==='lan-test-form') { event.preventDefault();if(state.lanBusy)return;state.lanTarget=event.target.elements.lanTarget.value.trim();state.lanTest='';state.lanBusy=true;render();try { await invoke('test_ipv6_connection',{address:state.lanTarget});state.lanTest='TCP 连接成功；游戏能否加入还取决于版本、模组和服务器状态。'; } catch(e) { state.lanTest=String(e); } finally { state.lanBusy=false;render(); } return; } if (event.target.id === 'content-form') { event.preventDefault(); const data = new FormData(event.target); state.contentSource = data.get('source'); state.contentKind = data.get('kind'); state.contentSort=data.get('sort');state.contentQuery = String(data.get('query') || '').trim(); state.contentKey = String(data.get('apiKey') || state.contentKey);state.contentCategory=String(data.get('category')||state.contentCategory);state.contentGameFilter=String(data.get('gameFilter')||'').trim();state.contentLoaderFilter=String(data.get('loaderFilter')||'');state.contentEnvironment=String(data.get('environment')||'');state.contentPage=0;state.contentHasMore=false;void loadContentCategories(); await searchContent(true); return; } if (event.target.id !== 'settings-form') return; event.preventDefault(); const data = new FormData(event.target); const proxyUrl = String(data.get('proxyUrl') || '').trim(); const changed = state.gameDir !== data.get('gameDir').trim() || state.proxyUrl !== proxyUrl; const selectedVersion=state.versions.find(v=>v.id===state.selected && v.installed),isolationControl=event.target.querySelector('#version-isolation'),isolationChanged=selectedVersion && isolationControl && !isolationControl.disabled && isolationControl.checked!==!!selectedVersion.isolated; if(isolationChanged && state.gameDir!==data.get('gameDir').trim()) {flash('请先保存游戏目录，再修改版本隔离。','error');return;} if(isolationChanged && state.jobs.some(j=>j.gameDir===state.gameDir && ['queued','running','canceling'].includes(j.status))) {flash('该游戏目录有进行中或等待中的任务，请先取消或等待结束。','error');return;} try { await invoke('configure_proxy', { proxyUrl }); } catch (e) { const input = event.target.querySelector('#proxyUrl'); input.setCustomValidity(String(e)); input.reportValidity(); return; } if(isolationChanged) { try { await invoke('set_version_isolation',{gameDir:state.gameDir,version:selectedVersion.id,isolated:isolationControl.checked});selectedVersion.isolated=isolationControl.checked;state.localMods=[];state.contentResults=[];state.contentLoaded=false;state.modUpdates=null;state.selectedMods.clear();modManager.invalidate(); } catch(e) {flash(`无法修改版本隔离：${e}`,'error');return;} } Object.assign(state, { username: data.get('username').trim(), javaPath: data.get('javaPath').trim(), proxyUrl, gameDir: data.get('gameDir').trim(), memory: Number(data.get('memory') ?? state.memory), memoryMode:data.get('memoryMode')==='auto'?'auto':'manual', optimize:data.has('optimize'), jvmArgs:String(data.get('jvmArgs')||''), gameArgs:String(data.get('gameArgs')||'') }); persist(); if(changed){state.selectedMods.clear();state.modUpdates=null;state.modConflicts=null;modManager.invalidate();} render(); flash('设置已保存。'); if (changed) await refresh(); });
 const gameEvents=createGameEvents({state,render,renderOverlay,showCrash:showCrashNotice,refreshStats:gameProfile.loadStats});
 const restoreAccount=createAccountRestorer({state,restore:()=>invoke('restore_microsoft_account'),restoreAvatar:restoreOnlineAvatar,refreshAppearance:()=>refreshAppearance({reuse:true}),render,persist,flash});
+const launchGame=createGameLauncher({state,isOnline:usingOnlineAccount,restoreAccount:()=>restoreAccount({notify:false}),
+ shouldApplySkin:(gameDir,version)=>offlineSkinInstances[instanceKey(gameDir,version)]===true,
+ applySkin:(gameDir,version,username,skin)=>invoke('apply_offline_skin',{gameDir,version,username,skin}),
+ settings:effectiveLaunchSettings,launch:options=>invoke('launch_game',{options}),render:renderOverlay,flash});
 async function init() {
  updateDefaultBanner();
  window.setInterval(updateDefaultBanner,60*1000);
