@@ -36,7 +36,11 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/game-launcher.ts',['createGameLauncher']);
  load(window,'lib/account-actions.ts',['createAccountActions']);
  load(window,'react/renderer.tsx',['createRenderer']);
- load(window,'react/pages.tsx',['Icon','HomePage','VersionsPage','JavaPage']);
+ load(window,'react/icons.tsx',['Icon']);
+ load(window,'react/version-icon.tsx',['VersionIcon']);
+ load(window,'react/home-page.tsx',['HomePage']);
+ load(window,'react/versions-page.tsx',['VersionsPage']);
+ load(window,'react/java-page.tsx',['JavaPage']);
  load(window,'react/instance-settings.tsx',['InstanceSettingsDialog']);
  load(window,'react/lan-room.tsx',['LanRoomPage']);
  load(window,'react/public-servers.tsx',['PublicServersPage']);
@@ -50,6 +54,10 @@ module.exports=function installReactRenderer(window) {
  load(window,'react/manage-dialog.tsx',['ManageDialog']);
  load(window,'react/instance-theme.tsx',['InstanceThemeDialog']);
  load(window,'react/game-profile.tsx',['GameProfileDialog']);
+ load(window,'react/update-report.ts',['updateReport']);
+ load(window,'react/shader-status.tsx',['ShaderStatus']);
+ load(window,'react/local-mods.tsx',['LocalMods']);
+ load(window,'react/local-packs.tsx',['LocalPacks']);
  load(window,'react/content.tsx',['ContentPage']);
  load(window,'react/local-mod-dialog.tsx',['LocalModDialog']);
  load(window,'react/content-dialog.tsx',['ContentDialog']);
@@ -77,6 +85,8 @@ module.exports=function installReactRenderer(window) {
  load(window,'app/form-events.ts',['installFormEvents']);
  load(window,'app/startup.ts',['startApplication']);
  load(window,'app/click-dispatcher.ts',['installClickDispatcher']);
+ load(window,'job-history.ts',['createJobHistory']);
+ load(window,'job-progress.ts',['createJobProgressHandler']);
  load(window,'app/install-addons.ts',['installAddons']);
  load(window,'app/features/account.ts',['createAccountFeature']);
  load(window,'app/features/content.ts',['createContentFeature']);
@@ -88,7 +98,7 @@ module.exports=function installReactRenderer(window) {
 // Load the actual TypeScript entry in strict mode for browser integration tests.
 module.exports.runMain = function runMain(window, { exposeInternals = false } = {}) {
  const source = filename => fs.readFileSync(path.join(__dirname,'../src',filename),'utf8');
- const jobManager = transformSync(source('job-manager.ts'),{loader:'ts',format:'esm'}).code.replace(/export\s*\{[^}]*\};/g,'');
+ const jobManager = transformSync(source('job-manager.ts'),{loader:'ts',format:'esm'}).code.replace(/^import\s+(?:[^;]*?\s+from\s+)?['"][^'"]+['"];\r?\n/gm,'').replace(/export\s*\{[^}]*\};/g,'');
  window.eval(jobManager);
  const main = transformSync(source('main.ts'),{loader:'ts',format:'esm',target:'es2022'}).code.replace(/^import\s+(?:[^;]*?\s+from\s+)?['"][^'"]+['"];\r?\n/gm,'');
  const hooks = exposeInternals ? 'window.__cclTest={restoreJobs:jobs.restoreJobs,bannerPeriod};window.restoreThemeImages=appearance.restore;' : '';

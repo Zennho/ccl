@@ -100,7 +100,9 @@ npm run tauri dev
 常用命令：
 
 ```bash
-npm run check                              # 版本一致性、TypeScript 检查、前端测试和构建
+npm run check                              # 版本一致性、格式、TypeScript、前端测试和构建
+npm run format                             # 格式化前端 TypeScript 和 React 组件
+npm run format:check                       # 检查前端代码格式
 npm run typecheck                          # 检查前端 TypeScript 代码
 npm test                                   # 下载队列及界面交互测试
 cargo fmt --manifest-path src-tauri/Cargo.toml --check    # Rust 格式检查

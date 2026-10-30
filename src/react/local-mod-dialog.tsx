@@ -1,5 +1,5 @@
 import React from 'react';
-import { Icon } from './pages';
+import { Icon } from './icons';
 import type { LocalMod } from './types';
 
 export function LocalModDialog({ mod }: { mod: LocalMod }) {

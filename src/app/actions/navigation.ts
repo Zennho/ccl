@@ -1,5 +1,5 @@
-import type {LauncherState} from '../../lib/launcher-state';
-import type {ClickHandler} from './types';
+import type { LauncherState } from '../../lib/launcher-state';
+import type { ClickHandler } from './types';
 
 type AsyncAction = () => Promise<unknown>;
 interface Options {
@@ -18,7 +18,7 @@ interface Options {
   invalidateMods: () => void;
 }
 export function createNavigationHandler(options: Options): ClickHandler {
-  const {state,render} = options;
+  const { state, render } = options;
   async function open(page: string) {
     state.page = page;
     render();
@@ -29,9 +29,13 @@ export function createNavigationHandler(options: Options): ClickHandler {
     if (page === 'settings') void options.refreshMemory();
     if (page === 'java') await options.refreshJava();
     if (page === 'multiplayer' && state.lanView === 'room') await options.refreshAddresses();
-    if (page === 'multiplayer' && state.lanView === 'servers' && !state.serverCatalog) await options.refreshServers();
+    if (page === 'multiplayer' && state.lanView === 'servers' && !state.serverCatalog)
+      await options.refreshServers();
     if (page === 'content') {
-      if (!state.contentTarget || !state.versions.some(v => v.installed && v.id === state.contentTarget)) {
+      if (
+        !state.contentTarget ||
+        !state.versions.some((v) => v.installed && v.id === state.contentTarget)
+      ) {
         state.contentTarget = state.selected || '';
         state.selectedMods.clear();
         state.modUpdates = null;
@@ -45,7 +49,7 @@ export function createNavigationHandler(options: Options): ClickHandler {
       if (!state.contentLoaded) await options.searchContent();
     }
   }
-  return target => {
+  return (target) => {
     const button = target.closest<HTMLElement>('[data-page]');
     if (!button) return false;
     return open(button.dataset.page || '');
