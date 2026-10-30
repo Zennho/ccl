@@ -19,6 +19,7 @@ import { createGameEvents } from './lib/game-events.ts';
 import { createSystemStatus } from './lib/system-status.ts';
 import { syncMemoryControls as syncMemoryFields } from './lib/memory-controls.ts';
 import { createMultiplayer, copyText } from './lib/multiplayer.ts';
+import { createVersionManager } from './lib/version-manager.ts';
 import { createRenderer } from './react/renderer.tsx';
 import { HomePage, VersionsPage, JavaPage } from './react/pages.tsx';
 import { InstanceSettingsDialog } from './react/instance-settings.tsx';
@@ -236,17 +237,9 @@ function refreshAppearance({reuse=false}={}) {
  })();
  return request.promise;
 }
-async function refreshInstalled(dir) {
- if (dir !== state.gameDir) return;
- try {
-  const installed=await invoke('installed_versions',{gameDir:dir}); const byId=new Map(installed.map(v=>[v.id,v]));
-  if (state.online) { const known=new Set(state.versions.map(v=>v.id)); const extra=installed.filter(v=>!known.has(v.id)); state.versions=[...extra,...state.versions.map(v=>v.kind==='正式版'?{...v,installed:byId.has(v.id),isolated:!!byId.get(v.id)?.isolated,hasInstanceData:!!byId.get(v.id)?.hasInstanceData}:byId.get(v.id)).filter(Boolean)]; }
-  else state.versions=installed;
-  if (!installed.some(v=>v.id===state.selected)) { state.selected=installed[0]?.id || ''; persist(); }
-  loadInstalledCovers();
-  if (state.page==='versions' || state.page==='home') render(); else renderChrome();
- } catch (e) { flash(`无法刷新已安装版本：${e}`,'error'); }
-}
+const versionManager=createVersionManager({state,render,renderChrome,persist,loadCovers:loadInstalledCovers,flash,
+ listVersions:gameDir=>invoke('list_versions',{gameDir}),installed:gameDir=>invoke('installed_versions',{gameDir}),listJava:()=>invoke('list_java')});
+const refreshInstalled=versionManager.refreshInstalled,refreshJava=versionManager.refreshJava,refresh=versionManager.refresh;
 const { saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, enqueueJob, pumpJobs, requestJobCancel, jobEvent, queueVersion, activeJobCount } = createJobManager({
  state, invoke, persist, renderChrome, flash, render, refreshInstalled, renderDownloads,
  onJobFinished: async job => {
@@ -257,12 +250,6 @@ const { saveJobs, runnerFor, restoreJobs, renderJobList, hasJob, enqueueJob, pum
   }
  }
 });
-async function refreshJava() {
- state.javaLoading = true; if (state.page === 'java') render();
- try { state.javaRuntimes = await invoke('list_java'); }
- catch (e) { state.notice = `检测 Java 失败：${e}`; state.noticeKind = 'error'; }
- state.javaLoading = false; if (state.page === 'java') render();
-}
 let renderedPage = null;
 const inputController=createInputController({container:app,state,theme,render,renderSettings:renderSettingsPage,renderMods:renderLocalMods,renderPacks:renderLocalPacks,updateSearch:updateSearchResults,applyTheme,persist});
 function renderChrome() {
@@ -340,13 +327,6 @@ function renderVersionsPage() { renderer.page(VersionsPage,{versions:state.versi
 function updateSearchResults(kind) {
  if(kind==='server') {renderServerPage();hydrateThumbnails();return;}
  renderVersionsPage();
-}
-async function refresh() {
- state.loading = true; render();
- try { state.versions = await invoke('list_versions', { gameDir: state.gameDir }); state.online = true; }
- catch (e) { state.online = false; try { state.versions = await invoke('installed_versions', { gameDir: state.gameDir }); } catch {} state.notice = `无法获取官方版本列表：${e}`; state.noticeKind = 'error'; }
- if (!state.versions.some(v => v.id === state.selected && v.installed)) state.selected = state.versions.find(v => v.installed)?.id || '';
- state.loading = false; persist(); render();loadInstalledCovers();
 }
 app.addEventListener('pointerdown', event => { const edge=event.target.closest('[data-resize]'); if (edge && event.button===0 && isTauri()) getCurrentWindow().startResizeDragging(edge.dataset.resize).catch(e=>flash(`无法调整窗口大小：${e}`,'error')); });
 app.addEventListener('click', async event => {

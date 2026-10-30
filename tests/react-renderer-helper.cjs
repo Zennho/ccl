@@ -26,6 +26,7 @@ module.exports=function installReactRenderer(window) {
  load(window,'lib/memory-controls.ts',['syncMemoryControls']);
  window.syncMemoryFields=window.syncMemoryControls;
  load(window,'lib/multiplayer.ts',['createMultiplayer','copyText']);
+ load(window,'lib/version-manager.ts',['createVersionManager']);
  load(window,'react/renderer.tsx',['createRenderer']);
  load(window,'react/pages.tsx',['Icon','HomePage','VersionsPage','JavaPage']);
  load(window,'react/instance-settings.tsx',['InstanceSettingsDialog']);
