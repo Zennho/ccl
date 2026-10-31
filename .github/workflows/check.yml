@@ -2,7 +2,7 @@ name: Check
 
 on:
   push:
-    branches: [master]
+    branches: [master, feature/compact-launcher-ui]
   pull_request:
   workflow_dispatch:
 
@@ -60,7 +60,7 @@ jobs:
 
   branch-build:
     name: Preview package ${{ matrix.name }}
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && github.ref == 'refs/heads/feature/compact-launcher-ui')
     strategy:
       fail-fast: false
       matrix:
