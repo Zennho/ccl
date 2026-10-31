@@ -1,17 +1,18 @@
 /* A denser workspace keeps the existing panels and their behavior intact. */
 :root { color: #2c4030; background: #f6f7f2; }
 .app-shell { background: #f6f7f2; }
-.sidebar, .has-custom-background .sidebar { width: 164px; padding: 22px 10px 16px; background: #23362a; border-color: #304638; }
+.sidebar, .has-custom-background .sidebar { width: 164px; padding: 22px 10px 16px; background: #f4f6ef; border-color: #dfe7da; }
 .main { margin-left: 164px; width: calc(100% - 164px); }
 .brand { padding: 0 9px 30px; }
-.brand strong { color: #f2f8ee; font-family: inherit; font-size: 20px; }
-.brand strong span { color: #b7d7ab; }
+.brand strong { color: #304a35; font-family: inherit; font-size: 20px; }
+.brand strong span { color: #779a70; }
 .nav { gap: 4px; }
-.nav button { height: 41px; padding: 0 10px; gap: 10px; color: #bdcdbd; font-size: 12px; }
-.nav button.active { background: #34523d; color: #f2faee; }
-.nav button.active svg { color: #c5e2b8; }
-.nav button:hover { background: #304b38; color: #fff; }
-.side-footer { color: #a5b8a7; border-color: #47614c; }
+.nav button { height: 41px; padding: 0 10px; gap: 10px; color: #526b56; font-size: 12px; }
+.nav button.active { background: #dcebd8; color: #315c42; }
+.nav button.active svg { color: #426f4c; }
+.nav button:hover { background: #e8f0e4; color: #315c42; }
+.nav button.active:hover { background: #d2e5ce; }
+.side-footer { color: #718473; border-color: #dfe7da; }
 .topbar { height: 56px; padding: 0 24px; background: rgba(255,255,252,.82); border-color: #e1e8dc; }
 .content { max-width: none; padding: 24px; }
 .page-heading { margin-bottom: 20px; }
