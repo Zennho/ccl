@@ -90,7 +90,6 @@ export function Shell(p: ShellProps) {
             <strong>
               CCL<span>.</span>
             </strong>
-            <small>COMPASS CRAFT LAUNCHER</small>
           </div>
         </div>
         <nav className="nav">
