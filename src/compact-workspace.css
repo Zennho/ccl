@@ -1,0 +1,76 @@
+/* A denser workspace keeps the existing panels and their behavior intact. */
+:root { color: #2c4030; background: #f6f7f2; }
+.app-shell { background: #f6f7f2; }
+.sidebar, .has-custom-background .sidebar { width: 164px; padding: 22px 10px 16px; background: #23362a; border-color: #304638; }
+.main { margin-left: 164px; width: calc(100% - 164px); }
+.brand { padding: 0 9px 30px; }
+.brand strong { color: #f2f8ee; font-family: inherit; font-size: 20px; }
+.brand strong span { color: #b7d7ab; }
+.brand small { color: #9fb5a2; font-size: 7px; letter-spacing: .3px; }
+.nav { gap: 4px; }
+.nav button { height: 41px; padding: 0 10px; gap: 10px; color: #bdcdbd; font-size: 12px; }
+.nav button.active { background: #34523d; color: #f2faee; }
+.nav button.active svg { color: #c5e2b8; }
+.nav button:hover { background: #304b38; color: #fff; }
+.side-footer { color: #a5b8a7; border-color: #47614c; }
+.topbar { height: 56px; padding: 0 24px; background: rgba(255,255,252,.82); border-color: #e1e8dc; }
+.content { max-width: none; padding: 24px; }
+.page-heading { margin-bottom: 20px; }
+.page-heading h1 { font-size: 23px; }
+.page-heading p { font-size: 12px; }
+.account-entry { background: #fff; border: 1px solid #d7e2d3; padding: 4px 8px 4px 4px; }
+.account-entry-label { max-width: 120px; margin-left: 8px; opacity: 1; }
+.home-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.home-heading h1 { margin: 0 0 5px; }
+.home-hero { height: auto; min-height: 160px; overflow: visible; border: 1px solid #cbd9c5; border-radius: 12px; background: #dbe8d5; }
+.home-hero .hero-art { overflow: hidden; border-radius: inherit; }
+.home-hero .hero-custom { border-radius: inherit; }
+.home-hero .launch-panel { position: relative; z-index: 2; margin: 20px; min-height: 118px; display: flex; flex-wrap: nowrap; align-items: center; gap: 15px; padding: 18px; background: rgba(255,253,247,.91); border-color: rgba(255,255,255,.72); box-shadow: 0 8px 25px #263c2a1c; }
+.home-hero .launch-version { flex: 1 1 180px; min-width: 0; }
+.home-hero .launch-version strong { font-size: 15px; }
+.home-hero .home-version-options { right: 0; left: auto; }
+.home-player { display: flex; flex: 0 1 160px; min-width: 110px; flex-direction: column; align-items: flex-start; gap: 4px; padding: 5px 12px; border: 0; border-left: 1px solid #d7e2d2; background: transparent; color: #354b38; text-align: left; }
+.home-player small, .home-player span { font-size: 11px; color: #697e6b; }
+.home-player strong { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.home-player:hover { color: #426f4c; }
+.home-hero .play-button { min-width: 150px; width: auto; height: 46px; flex: none; background: #426f4c; }
+.home-workspace { display: grid; grid-template-columns: minmax(0, 2fr) minmax(230px, 1fr); gap: 16px; }
+.home-workspace .section-title { margin: 22px 0 10px; }
+.home-workspace .section-title h2 { margin: 0; font-size: 15px; }
+.home-workspace .text-link { margin: 0; }
+.home-instance-row { min-height: 60px; padding: 9px 12px; flex-wrap: nowrap; }
+.home-instance-row .row-name { min-width: 0; }
+.home-instance-row .row-name strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.home-instance-row .row-icon { width: 39px; height: 39px; flex: none; }
+.home-instance-state { color: #587c5b; background: #e8f2e4; border-radius: 14px; padding: 5px 9px; font-size: 11px; white-space: nowrap; }
+.home-instance-row .row-button { min-width: 55px; padding: 8px; }
+.home-instances .empty-state .outline-btn { margin: 12px auto 0; }
+.home-quick-card { padding: 17px; border: 1px solid #dfe7db; border-radius: 10px; background: #fffdf7; }
+.home-quick-card > strong { font-size: 13px; overflow-wrap: anywhere; }
+.home-quick-card p { margin: 6px 0 14px; color: #718471; font-size: 11px; }
+.home-quick-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.home-quick-buttons .row-button { width: 100%; min-width: 0; padding: 9px 5px; }
+.home-log-link { padding: 13px 3px; }
+.version-list, .settings-section, .content-search, .java-download-card, .job-card, .lan-card, .identity-card, .identity-preview { border-radius: 10px; }
+.version-row { min-height: 62px; padding: 10px 14px; }
+.version-section { margin-top: 18px; }
+.content-search { padding: 16px; }
+.settings-section { padding: 18px 20px; }
+.save-button, .play-button { background: #426f4c; border-radius: 7px; }
+.row-button, .outline-btn, .change-version { border-radius: 7px; }
+.nav button:focus-visible, .home-player:focus-visible, .home-quick-buttons button:focus-visible { outline: 2px solid #8cb786; outline-offset: 2px; }
+@media (max-width: 1100px) {
+  .sidebar, .has-custom-background .sidebar { width: 164px; }
+  .main { margin-left: 164px; width: calc(100% - 164px); }
+  .content { padding: 22px; }
+  .topbar { padding: 0 22px; }
+}
+@media (max-width: 950px) {
+  .home-hero { min-height: 150px; }
+  .home-hero .launch-panel { margin: 16px; padding: 14px; gap: 10px; }
+  .home-hero .play-button { min-width: 124px; }
+  .home-player { flex-basis: 120px; }
+  .home-workspace { grid-template-columns: minmax(0, 1fr) 220px; gap: 12px; }
+  .home-instance-row .row-name { min-width: 0; }
+  .home-instance-state { display: none; }
+}

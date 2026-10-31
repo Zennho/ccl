@@ -98,6 +98,8 @@ export function createPageController({
         version,
         versions: state.versions,
         accountStatus: playerStatus(),
+        playerName: playerName(),
+        versionVisual,
         visual: versionVisual(version),
         description: version?.installed
           ? getInstanceTheme(state.gameDir, version.id).description

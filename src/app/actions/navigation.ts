@@ -21,7 +21,20 @@ interface Options {
 export function createNavigationHandler(options: Options): ClickHandler {
   const { state, render } = options;
   let javaRequest = 0;
-  async function open(page: string) {
+  async function open(page: string, currentContentTarget = false) {
+    if (
+      page === 'content' &&
+      ((currentContentTarget && state.contentTarget !== state.selected) ||
+        !state.contentTarget ||
+        !state.versions.some((v) => v.installed && v.id === state.contentTarget))
+    ) {
+      state.contentTarget = state.selected || '';
+      state.selectedMods.clear();
+      state.modUpdates = null;
+      options.invalidateMods();
+      state.contentPage = 0;
+      state.contentLoaded = false;
+    }
     state.page = page;
     render();
     if (page === 'account') {
@@ -53,17 +66,6 @@ export function createNavigationHandler(options: Options): ClickHandler {
     if (page === 'multiplayer' && state.lanView === 'servers' && !state.serverCatalog)
       await options.refreshServers();
     if (page === 'content') {
-      if (
-        !state.contentTarget ||
-        !state.versions.some((v) => v.installed && v.id === state.contentTarget)
-      ) {
-        state.contentTarget = state.selected || '';
-        state.selectedMods.clear();
-        state.modUpdates = null;
-        options.invalidateMods();
-        state.contentPage = 0;
-        state.contentLoaded = false;
-      }
       await options.refreshMods();
       await options.refreshPacks();
       void options.loadCategories();
@@ -73,6 +75,6 @@ export function createNavigationHandler(options: Options): ClickHandler {
   return (target) => {
     const button = target.closest<HTMLElement>('[data-page]');
     if (!button) return false;
-    return open(button.dataset.page || '');
+    return open(button.dataset.page || '', button.hasAttribute('data-current-content-target'));
   };
 }

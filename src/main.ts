@@ -6,6 +6,7 @@ import './launch-screen.css';
 import './management.css';
 import './update.css';
 import './usability.css';
+import './compact-workspace.css';
 
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
